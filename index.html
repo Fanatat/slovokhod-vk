@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Словоход</title>
+  <link rel="stylesheet" href="style.css?v=3" />
+
+  <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
+       Вне билда (локальная разработка) маркер НЕ заменяется:
+       platform.js сам деградирует в dev-режим без SDK. -->
+  <script src="vk-bridge.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Экран 1: загрузка -->
+    <section id="loading" class="screen is-active">
+      <div class="loader" aria-hidden="true"></div>
+      <p class="loading-text" data-i18n="loading">Загрузка…</p>
+    </section>
+
+    <!-- Экран 2: главное меню -->
+    <section id="menu" class="screen">
+      <header class="menu-head">
+<h1 class="game-title" data-i18n="gameTitle">Филворд</h1>
+        <p class="game-sub" data-i18n="gameSub">находи слова на ощупь</p>
+      </header>
+
+      <nav class="menu-actions">
+        <button id="btn-continue" class="btn btn-secondary" hidden data-i18n="continue">Продолжить</button>
+        <button id="btn-play" class="btn btn-primary" data-i18n="play">Играть</button>
+        <button id="btn-levels" class="btn btn-secondary" data-i18n="levels">Уровни</button>
+      </nav>
+
+      <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
+
+      <!-- Подтверждение сброса прогресса -->
+      <div id="confirm" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="confirmTitle">Прогресс сбросится. Начать заново?</p>
+          <button id="btn-restart-yes" class="btn btn-primary" data-i18n="confirmYes">Начать заново</button>
+          <button id="btn-restart-no" class="btn btn-secondary" data-i18n="confirmNo">Отмена</button>
+        </div>
+      </div>
+
+      <p id="dev-badge" class="dev-badge" hidden>dev-режим: платформа не подключена</p>
+    </section>
+
+    <!-- Экран 3: выбор уровня -->
+    <section id="levels" class="screen">
+      <header class="lv-head">
+        <button id="btn-levels-back" class="icon-btn" aria-label="Назад">‹</button>
+        <span class="lv-title" data-i18n="chooseLevel">Выбор уровня</span>
+        <span id="lv-total" class="lv-total"></span>
+      </header>
+      <div id="levels-grid" class="levels-grid"></div>
+    </section>
+
+    <!-- Экран 4: игра -->
+    <section id="game" class="screen">
+      <header class="game-head">
+        <button id="btn-back" class="icon-btn" aria-label="Назад">‹</button>
+        <div class="game-head-center">
+          <span id="game-level" class="game-level"></span>
+          <span id="game-theme" class="game-theme"></span>
+        </div>
+        <div class="game-head-right">
+          <button id="btn-restart-level" class="icon-btn" aria-label="Заново" title="Заново">↻</button>
+          <button id="btn-sound-game" class="icon-btn snd" aria-label="Звук" title="Звук">♪</button>
+          <span id="game-counter" class="game-counter">0 / 0</span>
+        </div>
+      </header>
+      <div id="board-wrap" class="board-wrap">
+        <div id="board" class="board"></div>
+      </div>
+
+      <p id="howto" class="howto" hidden data-i18n="howto">Проведи пальцем по соседним буквам</p>
+      <div id="word-list" class="word-list"></div>
+      <button id="btn-hint" class="hint-btn" data-i18n="hint">Подсказка за рекламу</button>
+
+      <!-- Оверлей обучения: показывается один раз на первом уровне -->
+      <div id="tutorial" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="howToPlay">Как играть</p>
+          <div class="tut-demo">
+            <div class="tut-cell tut-path" style="animation-delay:0s">К</div>
+            <div class="tut-cell tut-path" style="animation-delay:0.45s">О</div>
+            <div class="tut-cell tut-empty"></div>
+            <div class="tut-cell tut-path" style="animation-delay:0.9s">Т</div>
+          </div>
+          <p class="tut-text" data-i18n="tutorialText">Веди пальцем по соседним буквам, чтобы составить слово</p>
+          <button id="btn-tutorial-ok" class="btn btn-primary" data-i18n="tutorialOk">Понятно!</button>
+        </div>
+      </div>
+
+      <!-- Оверлей победы -->
+      <div id="win" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="levelDone">Уровень пройден</p>
+          <p id="win-score" class="win-score"></p>
+          <p id="win-best" class="win-best"></p>
+          <p id="win-new" class="win-new" hidden data-i18n="newRecord">Новый рекорд!</p>
+          <button id="btn-next" class="btn btn-primary" data-i18n="next">Дальше</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="i18n.js"></script>
+  <script src="platform.js"></script>
+  <script src="levels.js"></script>
+  <script src="board.js"></script>
+  <script src="sound.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

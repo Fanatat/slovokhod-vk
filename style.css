@@ -1,0 +1,468 @@
+/* ============================================================
+   Филворд — арт-стиль студии «Пятница»: тёплая «бумага».
+   Кремовый фон, чернильные буквы, газетно-кроссвордный вид для аудитории 35+.
+   Вся палитра — здесь, в :root. Перекраска = смена этих значений.
+   ============================================================ */
+
+:root {
+  --bg: #f3ead6;          /* бумага */
+  --surface: #fbf5e7;     /* плитка клетки / карточка */
+  --tile-border: #e4d8bd; /* тонкая рамка плитки */
+  --text: #2b2723;        /* чернила */
+  --text-dim: #8c8273;    /* приглушённый текст */
+  --accent: #2b2723;      /* основная кнопка = чернильная */
+  --accent-ink: #f6efdd;  /* текст на основной кнопке = кремовый */
+  --accent2: #c2703c;        /* глина — текущее звено, акценты */
+  --accent2-tint: #f1ddca;   /* светлый тон под фон чипа */
+  --accent2-ink: #7a3f1d;    /* тёмный тон — текст на tint */
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* Запрет браузерного скролла, свайпа-обновления и выделения текста.
+   Закрывает п.1.10.2 (нет системного скролла / swipe-to-refresh)
+   и п.1.6.1.8 / 1.6.2.7 (лонгтап не выделяет поле, нет контекстного меню). */
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-color: var(--bg);
+  /* Слой 1 — мягкое свечение под курсором (центр двигает JS, на телефоне не видно).
+     Слой 2 — еле заметная «бумажная» крупка, чтобы фон не был плоским. */
+  background-image:
+    radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 62%),
+    radial-gradient(circle, rgba(80,60,30,0.05) 1px, transparent 1.5px);
+  background-size: auto, 22px 22px;
+  background-repeat: no-repeat, repeat;
+  color: var(--text);
+  font-family: Georgia, "PT Serif", "Times New Roman", serif;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* Игра занимает всю доступную область (п.1.6.1.1 / 1.6.2.1). */
+#app {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+.screen.is-active { display: flex; }
+
+/* Тёплый янтарный свет на главном меню: мягкое свечение сверху (от заголовка)
+   и чуть более тёмное у основания — как от свечи на пергаменте. */
+#menu {
+  background:
+    radial-gradient(ellipse 70% 42% at 50% 12%, rgba(255, 205, 100, 0.22), transparent),
+    radial-gradient(ellipse 90% 55% at 50% 100%, rgba(190, 125, 45, 0.13), transparent);
+}
+
+/* --- Экран загрузки --- */
+.loader {
+  width: 44px; height: 44px;
+  border: 4px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { margin-top: 16px; color: var(--text-dim); font-size: 15px; }
+
+/* --- Меню --- */
+.menu-head { margin-bottom: 40px; }
+.game-title { margin: 0; font-size: 40px; font-weight: 700; letter-spacing: 0.01em; }
+.game-sub { margin: 8px 0 0; color: var(--text-dim); font-size: 16px; }
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 320px;
+}
+
+/* Крупные тап-цели (п.1.8) — минимум 56px по высоте. */
+.btn {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius);
+  min-height: 56px;
+  padding: 0 24px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.06s ease, filter 0.15s ease;
+}
+.btn:active { transform: scale(0.98); }
+.btn-primary { background: var(--accent2); color: #f6efdd; }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--tile-border); }
+
+.sound-toggle {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  width: 44px; height: 44px;
+  border: 1px solid var(--tile-border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 20px;
+  cursor: pointer;
+}
+.sound-toggle.is-muted { color: var(--text-dim); }
+
+.dev-badge {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 0; right: 0;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ============================================================
+   Фаза 1 — игровой экран и поле. Те же CSS-переменные, что и меню,
+   поэтому перекраска позже = смена значений в :root, не правка логики.
+   ============================================================ */
+
+.game-head {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+.game-head-center { flex: 1; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.game-level { font-size: 14px; font-weight: 600; }
+.game-theme { color: var(--text-dim); font-size: 12px; }
+.game-counter { color: var(--text); font-size: 15px; min-width: 48px; text-align: right; }
+
+.icon-btn {
+  width: 44px; height: 44px;
+  border: 1px solid var(--tile-border); border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 26px; line-height: 1;
+  cursor: pointer;
+}
+.icon-btn:active { transform: scale(0.96); }
+
+/* Область под поле: между шапкой и списком слов. */
+.board-wrap {
+  position: absolute;
+  top: 64px; left: 0; right: 0; bottom: 188px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 32px;
+}
+
+/* Список слов уровня: над кнопкой подсказки. */
+.howto {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 122px;
+  margin: 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.word-list {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 84px;
+  padding: 4px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
+}
+.word-chip {
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 14px;
+  color: var(--text);
+  letter-spacing: 0.03em;
+}
+.word-chip.found {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+.word-chip.current {
+  background: var(--accent2-tint);
+  border: 2px solid var(--accent2);
+  color: var(--accent2-ink);
+  font-weight: 700;
+}
+.chain-sep {
+  color: var(--text-dim);
+  font-size: 13px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* Сетка. Размер задаётся из JS (Board.fit), клетки тянутся через 1fr. */
+.board {
+  display: grid;
+  gap: 6px;
+}
+
+/* Клетка-буква. Крупная тап-цель (п.1.8). */
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: 10px;
+  font-size: clamp(20px, 7vmin, 40px);
+  font-weight: 600;
+  aspect-ratio: 1 / 1;
+}
+
+/* Состояния клеток при вводе + цветовая обратная связь. */
+.board { touch-action: none; }            /* свайп не прокручивает страницу */
+.cell { transition: background-color 0.12s ease, color 0.12s ease; }
+.cell.active { background: #2f6fed; color: #fff; border-color: #2f6fed; }   /* синий — ведём */
+.cell.found  { background: #2e9e5b; color: #fff; border-color: #2e9e5b; }   /* зелёный — подтверждено */
+.cell.wrong  { background: #d64545; color: #fff; border-color: #d64545; }   /* красный — неверно (вспышка) */
+.cell.nudge  { box-shadow: inset 0 0 0 3px var(--accent2); }                 /* глина — «начни отсюда» */
+
+/* Фаза 3 — оверлей победы. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  z-index: 50;
+}
+.overlay[hidden] { display: none; }
+.overlay-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  text-align: center;
+  width: min(86%, 320px);
+}
+.overlay-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
+.overlay-card .btn { width: 100%; }
+.win-score { font-size: 28px; font-weight: 700; margin: 0 0 2px; color: var(--text); }
+.win-best  { font-size: 14px; color: var(--text-dim); margin: 0 0 14px; }
+.win-new   { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent2-ink); background: var(--accent2-tint); border: 1px solid var(--accent2); border-radius: 20px; padding: 3px 12px; margin: 0 0 14px; }
+.win-new[hidden] { display: none; }
+.lv-total  { margin-left: auto; font-size: 13px; color: var(--text-dim); }
+
+/* Фаза 5 — подсказка. */
+.cell.hint { box-shadow: inset 0 0 0 3px #f59e0b; }  /* янтарная рамка = подсказанная буква */
+.hint-btn {
+  position: absolute;
+  left: 50%;
+  bottom: max(28px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: var(--radius);
+  min-height: 48px;
+  padding: 0 20px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--tile-border);
+}
+.hint-btn:active { transform: translateX(-50%) scale(0.98); }
+
+/* Фаза 6 — анимации (тряска ошибки, празднование победы, конфетти). */
+@keyframes shake {
+  10%,90% { transform: translateX(-2px); }
+  20%,80% { transform: translateX(4px); }
+  30%,50%,70% { transform: translateX(-6px); }
+  40%,60% { transform: translateX(6px); }
+}
+.board.shake { animation: shake 0.32s ease; }
+
+@keyframes pop {
+  0% { transform: scale(0.85); opacity: 0; }
+  60% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.overlay-card.pop { animation: pop 0.35s ease; }
+
+.confetti {
+  position: absolute;
+  top: -12px;
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  animation: fall var(--fall-dur, 2.4s) ease-in forwards;
+}
+@keyframes fall {
+  to { transform: translateY(520px) rotate(540deg); opacity: 0; }
+}
+
+/* Туториал — мини-демо поля с анимированным путём. */
+.tut-demo {
+  display: grid;
+  grid-template-columns: repeat(2, 48px);
+  gap: 6px;
+  margin: 16px auto 14px;
+  width: fit-content;
+}
+.tut-cell {
+  width: 48px; height: 48px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: 10px;
+  font-size: 20px; font-weight: 600;
+}
+.tut-cell.tut-empty { background: transparent; border-color: transparent; }
+.tut-cell.tut-path { animation: tut-seq 2.8s ease infinite; }
+.tut-text { font-size: 15px; margin: 0 0 20px; line-height: 1.45; }
+
+/* Ячейка: сначала обычная → потом синяя (ведём) → потом зелёная (найдено). */
+@keyframes tut-seq {
+  0%, 18%  { background: var(--surface); color: var(--text); border-color: var(--tile-border); }
+  26%, 58% { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+  68%, 100%{ background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
+}
+
+/* Уважение к настройке «меньше движения». */
+@media (prefers-reduced-motion: reduce) {
+  .board.shake, .overlay-card.pop, .confetti { animation: none; }
+  .tut-cell.tut-path { animation: none; background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
+  /* При heartbeat-классе без анимации — краткая инверсия цвета чипа (акцент считывается). */
+  .word-chip.current.heartbeat { background: var(--accent2); border-color: var(--accent2); color: #f6efdd; }
+}
+
+/* Новые анимации — только если пользователь не просил убрать движение. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Появление поля: плитки выезжают каскадом снизу с fade-in. */
+  @keyframes cell-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .cell { animation: cell-in 220ms ease both; }
+
+  /* Нахождение слова: чип «пыхает» масштабом. */
+  @keyframes chip-pop {
+    0%   { transform: scale(1); }
+    45%  { transform: scale(1.08); }
+    100% { transform: scale(1); }
+  }
+  .word-chip.pop { animation: chip-pop 180ms ease; }
+
+  /* Плавный переход подсветки текущего звена. */
+  .word-chip { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+
+  /* Подсказка «начни отсюда»: глиняная рамка пульсирует ~1.2с (2 × 600мс). */
+  @keyframes nudge-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 3px var(--accent2); }
+    50%       { box-shadow: inset 0 0 0 3px var(--accent2), 0 0 8px 3px rgba(194,112,60,0.35); }
+  }
+  .cell.nudge { animation: nudge-pulse 0.6s ease-in-out 2; }
+
+  /* Сердцебиение текущего чипа при попытке не по порядку. */
+  @keyframes heartbeat {
+    0%   { transform: scale(1); }
+    20%  { transform: scale(1.15); }
+    40%  { transform: scale(1); }
+    65%  { transform: scale(1.1); }
+    100% { transform: scale(1); }
+  }
+  .word-chip.current.heartbeat { animation: heartbeat 600ms ease; }
+}
+
+/* Иконка звука: нота, перечёркнутая ДИАГОНАЛЬНОЙ чертой через CSS (ляжет поверх в любом шрифте). */
+.snd { position: relative; }
+.snd.is-muted { color: var(--text-dim); }
+.snd.is-muted::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 58%; height: 2px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  border-radius: 2px;
+}
+
+/* Правая группа в шапке игры: звук + счётчик. */
+.game-head-right { display: flex; align-items: center; gap: 8px; }
+
+/* Отступ между кнопками в оверлеях (подтверждение сброса). */
+.overlay-card .btn + .btn { margin-top: 10px; }
+
+/* ============================================================
+   Экран выбора уровня.
+   ============================================================ */
+#levels.screen {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+.lv-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: max(12px, env(safe-area-inset-top)) 12px 12px;
+}
+.lv-title { font-size: 18px; font-weight: 700; }
+
+/* Сетка тайлов: прокрутка ТОЛЬКО внутри, без браузерного скролла (п.1.10.2).
+   min-height:0 обязателен — без него flex-ребёнок не режется и вылазит за экран. */
+.levels-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  align-content: start;
+}
+
+/* .lv-tile — независимый класс, не наследует ничего от .cell. */
+.lv-tile {
+  appearance: none;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.lv-tile:active { transform: scale(0.96); }
+.lv-tile.locked { opacity: .5; pointer-events: none; }
+.lv-tile.current { border: 2px solid var(--accent2); }
