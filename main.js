@@ -46,6 +46,7 @@
   var levelScore = 0;    // очки текущего уровня
   var hintsUsed = 0;     // подсказки взяты в текущем уровне
   var tutorialShown = false; // туториал: показываем один раз за сессию
+  var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
 
   function showScreen(el) {
     var screens = document.querySelectorAll('.screen');
@@ -107,6 +108,7 @@
     hintsUsed = 0;
     // Указатель цепочки: сбрасывается при каждом открытии уровня.
     var chainPos = 0;
+    hintWord = (level.chain && level.chain.length) ? level.chain[0] : null;
 
     Board.render(level, {
       // Принять слово только если оно следующее в цепочке.
@@ -122,6 +124,7 @@
       onFound: function (word) {
         levelScore += 100;
         if (level.chain && level.chain.length) chainPos++;
+        hintWord = (level.chain && chainPos < level.chain.length) ? level.chain[chainPos] : null;
         if (elHowto) elHowto.hidden = true;
         // Пометить найденный чип: пых + зачёркнуть.
         var chip = document.querySelector('#word-list .word-chip[data-word="' + word + '"]');
@@ -249,6 +252,7 @@
       I18N.apply(document);
 
       if (!Platform.isAvailable() && devBadge) devBadge.hidden = false;
+      if (btnHint) btnHint.hidden = !Platform.isRewardedAvailable();
 
       showScreen(elMenu);
 
@@ -339,7 +343,7 @@
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
     Platform.showRewarded(
-      function () { hintsUsed++; Board.revealHint(); }, // onRewarded — после закрытия (п.4.7)
+      function () { hintsUsed++; Board.revealHint(hintWord); }, // onRewarded — chain[chainPos]
       function () { Sound.suspend(); },                  // onPause
       function () { Sound.resume(); }                    // onResume
     );

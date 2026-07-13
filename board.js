@@ -200,11 +200,20 @@ window.Board = (function () {
     return null;
   }
 
-  // Подсказка: подсветить первую ЕЩЁ НЕ подсвеченную букву среди ненайденных слов.
+  // Подсказка: подсветить первую ЕЩЁ НЕ подсвеченную букву.
+  // targetWord (опц.) — целиться строго в это слово (текущее звено цепочки).
+  // Без аргумента — старое поведение (любое ненайденное слово).
   // Повторные вызовы открывают следующие буквы. false — если открывать нечего.
-  function revealHint() {
+  function revealHint(targetWord) {
     if (!current) return false;
-    for (var i = 0; i < current.words.length; i++) {
+    var startIdx = 0, endIdx = current.words.length;
+    if (targetWord) {
+      // Ищем индекс целевого слова — только его буквы будем открывать.
+      for (var ti = 0; ti < current.words.length; ti++) {
+        if (current.words[ti].word === targetWord) { startIdx = ti; endIdx = ti + 1; break; }
+      }
+    }
+    for (var i = startIdx; i < endIdx; i++) {
       var w = current.words[i];
       if (found[w.word]) continue;
       for (var j = 0; j < w.path.length; j++) {
