@@ -46,6 +46,17 @@
   var levelScore = 0;    // очки текущего уровня
   var hintsUsed = 0;     // подсказки взяты в текущем уровне
   var tutorialShown = false; // туториал: показываем один раз за сессию
+  var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
+
+  // Гейт частоты interstitial (п.4.7): каждый 3-й уровень И не чаще раза
+  // в 90 сек — оба условия обязательны. Это ЕДИНСТВЕННАЯ подтверждённая
+  // защита от частых показов: наличие платформенного троттлинга
+  // (Яндекс/VK) первоисточником НЕ подтверждено на 19.07.2026 — не
+  // полагаться на него, пока не появится документальное подтверждение.
+  var AD_LEVEL_GATE = 3;
+  var AD_MIN_INTERVAL_MS = 90000;
+  var levelsSinceAd = 0;
+  var lastAdShownAt = 0;
 
   function showScreen(el) {
     var screens = document.querySelectorAll('.screen');
@@ -85,9 +96,8 @@
   function openLevel(index) {
     var level = Levels.get(index);
     if (!level) return;
-    var isLast = !Levels.get(index + 1);
     currentIndex = index;
-    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1) + ' / ' + Levels.count();
+    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1);
     gameTheme.textContent = level.theme;
     gameCounter.textContent = '0 / ' + level.words.length;
     elWin.hidden = true;
@@ -107,6 +117,7 @@
     hintsUsed = 0;
     // Указатель цепочки: сбрасывается при каждом открытии уровня.
     var chainPos = 0;
+    hintWord = (level.chain && level.chain.length) ? level.chain[0] : null;
 
     Board.render(level, {
       // Принять слово только если оно следующее в цепочке.
@@ -122,6 +133,7 @@
       onFound: function (word) {
         levelScore += 100;
         if (level.chain && level.chain.length) chainPos++;
+        hintWord = (level.chain && chainPos < level.chain.length) ? level.chain[chainPos] : null;
         if (elHowto) elHowto.hidden = true;
         // Пометить найденный чип: пых + зачёркнуть.
         var chip = document.querySelector('#word-list .word-chip[data-word="' + word + '"]');
@@ -147,8 +159,8 @@
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
         setTimeout(function () {
-          if (elWinTitle) elWinTitle.textContent = isLast ? I18N.t('allDone') : I18N.t('levelDone');
-          btnNext.textContent = isLast ? I18N.t('toMenu') : I18N.t('next');
+          if (elWinTitle) elWinTitle.textContent = I18N.t('levelDone');
+          btnNext.textContent = I18N.t('next');
           if (elWinScore) elWinScore.textContent = I18N.t('score') + ': ' + finalScore;
           if (elWinBest)  elWinBest.textContent  = I18N.t('best')  + ': ' + Math.max(best, finalScore);
           if (elWinNew)   elWinNew.hidden = !isNew;
@@ -223,6 +235,7 @@
     levelsGrid.innerHTML = '';
     if (lvTotal) lvTotal.textContent = records.total > 0 ? 'Итого: ' + records.total : '';
     var count = Levels.count();
+    var currentTile = null;
     for (var i = 0; i < count; i++) {
       var tile = document.createElement('button');
       tile.className = 'lv-tile';
@@ -231,12 +244,21 @@
         tile.innerHTML = LOCK_SVG;
       } else {
         tile.textContent = i + 1;
-        if (i === savedIndex) tile.classList.add('current');
+        if (i === savedIndex) { tile.classList.add('current'); currentTile = tile; }
+        // onclick, не addEventListener: плитки перерисовываются заново при
+        // каждом renderLevels() (levelsGrid.innerHTML = '' выше) — onclick
+        // просто перезатирается на новых элементах, дубли накопиться не могут.
         (function (idx) {
-          tile.addEventListener('click', function () { openLevel(idx); });
+          tile.onclick = function () { openLevel(idx); };
         })(i);
       }
       levelsGrid.appendChild(tile);
+    }
+    // Текущий уровень должен быть виден сразу, без ручной прокрутки —
+    // при 100 плитках он может быть далеко от начала сетки. Скроллим
+    // ТОЛЬКО внутренний контейнер (levelsGrid), страница не двигается.
+    if (currentTile) {
+      currentTile.scrollIntoView({ block: 'center', inline: 'nearest' });
     }
   }
 
@@ -249,6 +271,7 @@
       I18N.apply(document);
 
       if (!Platform.isAvailable() && devBadge) devBadge.hidden = false;
+      if (btnHint) btnHint.hidden = !Platform.isRewardedAvailable();
 
       showScreen(elMenu);
 
@@ -303,8 +326,11 @@
 
   if (btnLevels) btnLevels.addEventListener('click', function () {
     Sound.resumeContext();
-    renderLevels();
+    // Экран сначала показываем, ПОТОМ рендерим сетку: renderLevels() внутри
+    // вызывает scrollIntoView() на текущей плитке, а на display:none
+    // контейнере scrollIntoView не может посчитать позицию.
     showScreen(elLevels);
+    renderLevels();
   });
 
   if (btnLevelsBack) btnLevelsBack.addEventListener('click', function () {
@@ -314,23 +340,39 @@
   btnNext.addEventListener('click', function () {
     elWin.hidden = true;
     var next = currentIndex + 1;
-    // Межуровневая реклама в логичной паузе (п.4.4). SDK сам соблюдает
-    // минимальный интервал — если рано, ролик просто не покажется,
-    // но onResume всё равно вызовется и игра продолжится.
+
+    function proceed() {
+      if (Levels.get(next)) {
+        openLevel(next);
+      } else {
+        // Следующего уровня нет (пройден последний). Прогресс НЕ трогаем —
+        // он уже сохранён в onComplete; «Продолжить» должен и дальше
+        // открывать пройденный последний уровень.
+        Board.clear();
+        showScreen(elMenu);
+      }
+    }
+
+    // Гейт частоты (п.4.7): каждый 3-й уровень И не чаще раза в 90 сек.
+    levelsSinceAd++;
+    var now = Date.now();
+    var gateOk = levelsSinceAd >= AD_LEVEL_GATE && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
+
+    if (!gateOk) {
+      proceed();
+      return;
+    }
+
+    levelsSinceAd = 0;
+    lastAdShownAt = now;
+    // Межуровневая реклама в логичной паузе (п.4.4). Частоту уже отфильтровал
+    // гейт выше (AD_LEVEL_GATE/AD_MIN_INTERVAL_MS) — это единственная
+    // подтверждённая защита, платформенный троттлинг не подтверждён.
     Platform.showInterstitial(
       function () { Sound.suspend(); },  // onPause (п.4.7)
       function () {                       // onResume
         Sound.resume();
-        if (Levels.get(next)) {
-          openLevel(next);
-        } else {
-          // Все уровни пройдены: сбрасываем прогресс и возвращаем в меню.
-          savedIndex = null;
-          Platform.save({ level: 0, max: maxUnlocked, records: records });
-          setMenuProgress(false);
-          Board.clear();
-          showScreen(elMenu);
-        }
+        proceed();
       }
     );
   });
@@ -339,7 +381,7 @@
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
     Platform.showRewarded(
-      function () { hintsUsed++; Board.revealHint(); }, // onRewarded — после закрытия (п.4.7)
+      function () { hintsUsed++; Board.revealHint(hintWord); }, // onRewarded — chain[chainPos]
       function () { Sound.suspend(); },                  // onPause
       function () { Sound.resume(); }                    // onResume
     );

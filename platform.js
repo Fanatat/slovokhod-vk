@@ -21,25 +21,37 @@
 
    Маппинг контракта v2:
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
+                                 + VKWebAppCheckNativeAds (доступность rewarded)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
      getLang()                 → URL-параметр vk_language или navigator.language
      isAvailable()             → флаг ready после успешного init
+     isRewardedAvailable()     → VKWebAppCheckNativeAds {ad_format:'reward'} (кешируется при init)
+                                 dev-режим (!ready) → true (кнопка видна для тестирования)
      save(fullState)           → VKWebAppStorageSet {key, value}
      load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value
      showInterstitial          → VKWebAppShowNativeAds {ad_format:'interstitial'}
      showRewarded              → VKWebAppShowNativeAds {ad_format:'reward'}
                                  result.result === true → досмотрено
      gameplayStart/Stop        → no-op
+   Доки VK Bridge: https://dev.vk.com/bridge/VKWebAppCheckNativeAds
    ============================================================ */
 window.Platform = (() => {
   const STORAGE_KEY   = 'filword_save';
   const INIT_TIMEOUT  = 2500;   // мс — после этого уходим в dev-режим
+
+  // Dev-фолбэк на localStorage (см. save/load ниже): активен ТОЛЬКО
+  // когда ready === false. ready становится true ровно в одном месте —
+  // внутри init(), и только после успешного vkBridge.send('VKWebAppInit').
+  // При живом Bridge этот путь физически недостижим: та же переменная,
+  // что гейтит showInterstitial/showRewarded/isAvailable() ниже.
+  const DEV_SAVE_KEY = 'slovohod_dev_save_vk';
 
   function hasBridge() {
     return typeof vkBridge !== 'undefined';
   }
 
   let ready = false;
+  let rewardedAvailable = false;
 
   /* ---------- Инициализация ----------
      Порядок защит:
@@ -67,6 +79,23 @@ window.Platform = (() => {
       await Promise.race([vkBridge.send('VKWebAppInit'), timeoutP]);
       ready = true;
       console.log('[platform] VK Bridge init OK');
+
+      // Проверяем доступность rewarded-рекламы сразу при init, кешируем результат.
+      // https://dev.vk.com/bridge/VKWebAppCheckNativeAds
+      const checkTimeout = new Promise((_, rej) =>
+        setTimeout(() => rej(new Error('timeout')), 1500),
+      );
+      try {
+        const check = await Promise.race([
+          vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' }),
+          checkTimeout,
+        ]);
+        rewardedAvailable = check.result === true;
+        console.log('[platform] rewarded доступен:', rewardedAvailable);
+      } catch (e) {
+        rewardedAvailable = false;
+        console.warn('[platform] VKWebAppCheckNativeAds:', e.message || e);
+      }
       return true;
     } catch (e) {
       if (e.message === 'timeout') {
@@ -96,11 +125,26 @@ window.Platform = (() => {
   /* ---------- Доступность ---------- */
   function isAvailable() { return ready; }
 
+  /* ---------- Rewarded-реклама доступна ----------
+     Кеш заполняется в init() через VKWebAppCheckNativeAds.
+     В dev-режиме (!ready) возвращаем true: кнопка видна, подсказка выдаётся бесплатно. */
+  function isRewardedAvailable() {
+    if (!ready) return true;
+    return rewardedAvailable;
+  }
+
   /* ---------- Сохранение ----------
      VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK. */
   async function save(fullState) {
     if (!ready) {
-      console.warn('[platform] dev-режим: сейв пропущен');
+      // Dev-режим: нет живого Bridge — фолбэк на localStorage, чтобы
+      // «сохранил → перезагрузил» было проверяемо на СОБРАННОМ архиве
+      // (index.html открыт напрямую/standalone, без реального VK).
+      try {
+        localStorage.setItem(DEV_SAVE_KEY, JSON.stringify(fullState));
+      } catch (e) {
+        console.warn('[platform] dev-режим: localStorage недоступен', e);
+      }
       return;
     }
     try {
@@ -114,7 +158,15 @@ window.Platform = (() => {
   }
 
   async function load() {
-    if (!ready) return null;
+    if (!ready) {
+      try {
+        const raw = localStorage.getItem(DEV_SAVE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.warn('[platform] dev-режим: localStorage недоступен', e);
+        return null;
+      }
+    }
     try {
       const res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
       const raw = res.keys && res.keys[0] && res.keys[0].value;
@@ -165,7 +217,7 @@ window.Platform = (() => {
   function gameplayStop(_outcome) {}
 
   return {
-    init, gameReady, getLang, isAvailable,
+    init, gameReady, getLang, isAvailable, isRewardedAvailable,
     save, load,
     showInterstitial, showRewarded,
     gameplayStart, gameplayStop,

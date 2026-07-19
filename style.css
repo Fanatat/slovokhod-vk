@@ -268,11 +268,11 @@ html, body {
   text-align: center;
   width: min(86%, 320px);
 }
-.overlay-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
+.overlay-title { margin: 0 0 20px; font-size: 22px; font-weight: 700; }
 .overlay-card .btn { width: 100%; }
-.win-score { font-size: 28px; font-weight: 700; margin: 0 0 2px; color: var(--text); }
-.win-best  { font-size: 14px; color: var(--text-dim); margin: 0 0 14px; }
-.win-new   { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent2-ink); background: var(--accent2-tint); border: 1px solid var(--accent2); border-radius: 20px; padding: 3px 12px; margin: 0 0 14px; }
+.win-score { font-size: 14px; font-weight: 600; margin: 16px 0 2px; color: var(--text-dim); }
+.win-best  { font-size: 13px; color: var(--text-dim); margin: 0; }
+.win-new   { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent2-ink); background: var(--accent2-tint); border: 1px solid var(--accent2); border-radius: 20px; padding: 3px 12px; margin: 8px 0 0; }
 .win-new[hidden] { display: none; }
 .lv-total  { margin-left: auto; font-size: 13px; color: var(--text-dim); }
 
