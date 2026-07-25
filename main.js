@@ -37,13 +37,6 @@
   var btnLevels = document.getElementById('btn-levels');
   var btnLevelsBack = document.getElementById('btn-levels-back');
   var lvTotal = document.getElementById('lv-total');
-  var btnTheme = document.getElementById('btn-theme');
-  var elThemeShop = document.getElementById('theme-shop');
-  var themeShopStatus = document.getElementById('theme-shop-status');
-  var btnThemeBuy = document.getElementById('btn-theme-buy');
-  var btnThemeApply = document.getElementById('btn-theme-apply');
-  var btnThemeRevert = document.getElementById('btn-theme-revert');
-  var btnThemeClose = document.getElementById('btn-theme-close');
 
   var soundOn = true;
   var currentIndex = 0;  // индекс текущего уровня
@@ -55,24 +48,9 @@
   var tutorialShown = false; // туториал: показываем один раз за сессию
   var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
 
-  // Косметическая покупка (задача В, смена стандарта п.81): альт-палитра
-  // «мятная бумага». Идентификатор товара — соответствует Item в кабинете ВК
-  // (создаётся основателем, см. отчёт). Разблокировка витрины — после
-  // прохождения THEME_UNLOCK_LEVEL уровней (нижняя граница диапазона 2-5).
-  var THEME_ITEM_ID = 'slovohod_theme_mint';
-  var THEME_UNLOCK_LEVEL = 3;
-  var ownedThemeAlt = false;
-  var activeTheme = 'default'; // 'default' | 'alt'
-
-  // Гейт частоты interstitial (п.4.7): каждый 2-й уровень И не чаще раза
-  // в 60 сек — оба условия обязательны. Это ЕДИНСТВЕННАЯ подтверждённая
-  // защита от частых показов: наличие платформенного троттлинга
-  // (Яндекс/VK) первоисточником НЕ подтверждено на 19.07.2026 — не
-  // полагаться на него, пока не появится документальное подтверждение.
-  // Было 3/90с — за 41 запуск на ВК 0 показов: короткие тестовые сессии,
-  // видимо, не успевали набрать 3 уровня с 90с зазором. Сужено до 2/60с
-  // (нижняя граница диапазона задачи Б) ради большего числа возможностей
-  // показа; сама реклама остаётся необязательной (fill не гарантирован).
+  // Гейт частоты interstitial (задача Б, п.4.7): каждый 2-й уровень И не
+  // чаще раза в 60 сек — оба условия обязательны. Гейт живёт в памяти
+  // сессии (не в сейве) — на новый запуск игры счётчик сбрасывается.
   var AD_LEVEL_GATE = 2;
   var AD_MIN_INTERVAL_MS = 60000;
   var levelsSinceAd = 0;
@@ -94,95 +72,11 @@
   }
 
   // Подпись кнопки подсказки: обещает ролик только если реклама реально
-  // доступна (п.180) — кнопка сама всегда видна, см. start().
+  // доступна (задача А, п.180) — кнопка сама всегда видна, см. start().
   function updateHintLabel() {
     if (!btnHint) return;
     btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
   }
-
-  // Применяет косметическую тему (или возвращает обычную «бумагу»).
-  // CSS-переменные переопределены в style.css классом html.theme-alt.
-  function applyTheme(theme) {
-    activeTheme = theme;
-    document.documentElement.classList.toggle('theme-alt', theme === 'alt');
-  }
-
-  // Текущее полное состояние прогресса — для целостного сейва (сейв ОБЪЕКТОМ
-  // ЦЕЛИКОМ, ни одно поле не пишем частично).
-  function saveState() {
-    Platform.save({
-      level: currentIndex,
-      max: maxUnlocked,
-      records: records,
-      owned: { theme_alt: ownedThemeAlt },
-      activeTheme: activeTheme,
-    });
-  }
-
-  // Кнопка витрины видна только когда покупки поддерживает площадка (ВК)
-  // И игрок прошёл достаточно уровней (задача В: разблокировка 2-5 уровней).
-  function updateThemeButtonVisibility() {
-    if (!btnTheme) return;
-    btnTheme.hidden = !(Platform.canPurchase() && maxUnlocked >= THEME_UNLOCK_LEVEL);
-  }
-
-  // Состояние витрины: локальная подпись + какие кнопки показывать.
-  function updateThemeShopUI() {
-    if (!elThemeShop) return;
-    if (ownedThemeAlt) {
-      if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeOwned');
-      if (btnThemeBuy) btnThemeBuy.hidden = true;
-      if (btnThemeApply)  btnThemeApply.hidden  = activeTheme === 'alt';
-      if (btnThemeRevert) btnThemeRevert.hidden = activeTheme !== 'alt';
-    } else {
-      if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeBuyHint');
-      if (btnThemeBuy) btnThemeBuy.hidden = false;
-      if (btnThemeApply)  btnThemeApply.hidden  = true;
-      if (btnThemeRevert) btnThemeRevert.hidden = true;
-    }
-  }
-
-  if (btnTheme) btnTheme.addEventListener('click', function () {
-    Sound.resumeContext();
-    updateThemeShopUI();
-    elThemeShop.hidden = false;
-  });
-
-  if (btnThemeClose) btnThemeClose.addEventListener('click', function () {
-    elThemeShop.hidden = true;
-  });
-
-  if (btnThemeBuy) btnThemeBuy.addEventListener('click', function () {
-    btnThemeBuy.disabled = true;
-    if (themeShopStatus) themeShopStatus.textContent = I18N.t('themePending');
-    Platform.purchase(THEME_ITEM_ID).then(function (res) {
-      btnThemeBuy.disabled = false;
-      if (res && res.success) {
-        ownedThemeAlt = true;
-        applyTheme('alt');
-        saveState();
-        updateThemeShopUI(); // владение изменилось — переключить купить → применить/вернуть
-      } else {
-        // Отмена / нет товара в кабинете / ошибка сети — тихий фолбэк,
-        // игра не падает (см. НЕ ДЕЛАТЬ / предусловие основателя в задаче В).
-        // updateThemeShopUI() здесь НЕ зовём: она сбросила бы это сообщение
-        // обратно на themeBuyHint, т.к. ownedThemeAlt всё ещё false.
-        if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeUnavailable');
-      }
-    });
-  });
-
-  if (btnThemeApply) btnThemeApply.addEventListener('click', function () {
-    applyTheme('alt');
-    saveState();
-    updateThemeShopUI();
-  });
-
-  if (btnThemeRevert) btnThemeRevert.addEventListener('click', function () {
-    applyTheme('default');
-    saveState();
-    updateThemeShopUI();
-  });
 
   function renderWordList(level) {
     if (!elWordList) return;
@@ -207,8 +101,9 @@
   function openLevel(index) {
     var level = Levels.get(index);
     if (!level) return;
+    var isLast = !Levels.get(index + 1);
     currentIndex = index;
-    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1);
+    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1) + ' / ' + Levels.count();
     gameTheme.textContent = level.theme;
     gameCounter.textContent = '0 / ' + level.words.length;
     elWin.hidden = true;
@@ -218,7 +113,7 @@
 
     // Сохраняем прогресс (текущий уровень). Переживает обновление страницы (п.1.9).
     maxUnlocked = Math.max(maxUnlocked, index);
-    saveState();
+    Platform.save({ level: index, max: maxUnlocked, records: records });
     // Держим «Продолжить» в актуальном состоянии в течение сессии.
     savedIndex = index;
     if (index > 0) setMenuProgress(true);
@@ -266,13 +161,12 @@
         records.total = tot;
         // Разблокировать следующий уровень и сохранить.
         maxUnlocked = Math.min(Levels.count() - 1, Math.max(maxUnlocked, currentIndex + 1));
-        saveState();
-        updateThemeButtonVisibility();
+        Platform.save({ level: currentIndex, max: maxUnlocked, records: records });
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
         setTimeout(function () {
-          if (elWinTitle) elWinTitle.textContent = I18N.t('levelDone');
-          btnNext.textContent = I18N.t('next');
+          if (elWinTitle) elWinTitle.textContent = isLast ? I18N.t('allDone') : I18N.t('levelDone');
+          btnNext.textContent = isLast ? I18N.t('toMenu') : I18N.t('next');
           if (elWinScore) elWinScore.textContent = I18N.t('score') + ': ' + finalScore;
           if (elWinBest)  elWinBest.textContent  = I18N.t('best')  + ': ' + Math.max(best, finalScore);
           if (elWinNew)   elWinNew.hidden = !isNew;
@@ -347,7 +241,6 @@
     levelsGrid.innerHTML = '';
     if (lvTotal) lvTotal.textContent = records.total > 0 ? 'Итого: ' + records.total : '';
     var count = Levels.count();
-    var currentTile = null;
     for (var i = 0; i < count; i++) {
       var tile = document.createElement('button');
       tile.className = 'lv-tile';
@@ -356,21 +249,12 @@
         tile.innerHTML = LOCK_SVG;
       } else {
         tile.textContent = i + 1;
-        if (i === savedIndex) { tile.classList.add('current'); currentTile = tile; }
-        // onclick, не addEventListener: плитки перерисовываются заново при
-        // каждом renderLevels() (levelsGrid.innerHTML = '' выше) — onclick
-        // просто перезатирается на новых элементах, дубли накопиться не могут.
+        if (i === savedIndex) tile.classList.add('current');
         (function (idx) {
-          tile.onclick = function () { openLevel(idx); };
+          tile.addEventListener('click', function () { openLevel(idx); });
         })(i);
       }
       levelsGrid.appendChild(tile);
-    }
-    // Текущий уровень должен быть виден сразу, без ручной прокрутки —
-    // при 100 плитках он может быть далеко от начала сетки. Скроллим
-    // ТОЛЬКО внутренний контейнер (levelsGrid), страница не двигается.
-    if (currentTile) {
-      currentTile.scrollIntoView({ block: 'center', inline: 'nearest' });
     }
   }
 
@@ -383,11 +267,12 @@
       I18N.apply(document);
 
       if (!Platform.isAvailable() && devBadge) devBadge.hidden = false;
-      // Кнопка подсказки НИКОГДА не прячется (смена стандарта п.180): при
-      // adblock/отсутствии филла VKWebAppCheckNativeAds исторически ложно
-      // сообщает "недоступно" даже когда реклама реально показывается —
-      // прятать кнопку по этому сигналу нельзя. Подпись лишь не обещает
-      // ролик, если реклама недоступна; сама подсказка в этом случае бесплатна.
+      // Кнопка подсказки НИКОГДА не прячется (задача А, смена стандарта
+      // п.180): при adblock/отсутствии филла VKWebAppCheckNativeAds
+      // исторически ложно сообщает "недоступно" даже когда реклама
+      // реально показывается — прятать кнопку по этому сигналу нельзя.
+      // Подпись лишь не обещает ролик, если реклама недоступна; сама
+      // подсказка в этом случае бесплатна (см. обработчик клика ниже).
       updateHintLabel();
 
       showScreen(elMenu);
@@ -411,13 +296,6 @@
         if (data && data.records && typeof data.records.levels === 'object') {
           records = { levels: data.records.levels, total: data.records.total || 0 };
         }
-        // Владение косметикой (задача В); старые сохранения без поля owned
-        // не ломают игру — просто считаем тему некупленной.
-        if (data && data.owned && data.owned.theme_alt === true) {
-          ownedThemeAlt = true;
-          applyTheme(data.activeTheme === 'alt' ? 'alt' : 'default');
-        }
-        updateThemeButtonVisibility();
       });
     });
   }
@@ -455,11 +333,8 @@
 
   if (btnLevels) btnLevels.addEventListener('click', function () {
     Sound.resumeContext();
-    // Экран сначала показываем, ПОТОМ рендерим сетку: renderLevels() внутри
-    // вызывает scrollIntoView() на текущей плитке, а на display:none
-    // контейнере scrollIntoView не может посчитать позицию.
-    showScreen(elLevels);
     renderLevels();
+    showScreen(elLevels);
   });
 
   if (btnLevelsBack) btnLevelsBack.addEventListener('click', function () {
@@ -474,15 +349,19 @@
       if (Levels.get(next)) {
         openLevel(next);
       } else {
-        // Следующего уровня нет (пройден последний). Прогресс НЕ трогаем —
-        // он уже сохранён в onComplete; «Продолжить» должен и дальше
-        // открывать пройденный последний уровень.
+        // Все уровни пройдены: сбрасываем прогресс и возвращаем в меню.
+        savedIndex = null;
+        Platform.save({ level: 0, max: maxUnlocked, records: records });
+        setMenuProgress(false);
         Board.clear();
         showScreen(elMenu);
       }
     }
 
-    // Гейт частоты (п.4.7): каждый 3-й уровень И не чаще раза в 90 сек.
+    // Гейт частоты (задача Б, п.4.7): каждый 2-й уровень И не чаще раза
+    // в 60 сек — оба условия обязательны. Раньше показ был безусловным
+    // на каждый переход (SDK сам якобы соблюдает интервал) — за 41 запуск
+    // на ВК это дало 0 показов рекламы; гейт даёт предсказуемые точки показа.
     levelsSinceAd++;
     var now = Date.now();
     var gateOk = levelsSinceAd >= AD_LEVEL_GATE && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
@@ -494,11 +373,10 @@
 
     levelsSinceAd = 0;
     lastAdShownAt = now;
-    // Межуровневая реклама в логичной паузе (п.4.4). Частоту уже отфильтровал
-    // гейт выше (AD_LEVEL_GATE/AD_MIN_INTERVAL_MS) — это единственная
-    // подтверждённая защита, платформенный троттлинг не подтверждён.
+    // Межуровневая реклама в логичной паузе (п.4.4); пауза/возобновление
+    // звука на время показа (п.4.7).
     Platform.showInterstitial(
-      function () { Sound.suspend(); },  // onPause (п.4.7)
+      function () { Sound.suspend(); },  // onPause
       function () {                       // onResume
         Sound.resume();
         proceed();
@@ -507,8 +385,8 @@
   });
 
   // Подсказка за rewarded-видео (п.4.5): по желанию смотрим ролик → подсвечивается буква.
-  // Если реклама недоступна (adblock/нет филла) — подсказка бесплатна (п.190),
-  // ролик не пытаемся показывать вовсе: кнопка это уже честно не обещает.
+  // Если реклама недоступна (adblock/нет филла) — подсказка бесплатна (п.190,
+  // задача А), ролик не пытаемся показывать вовсе: кнопка это не обещает.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
     if (!Platform.isRewardedAvailable()) {
