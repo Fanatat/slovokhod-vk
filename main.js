@@ -37,6 +37,13 @@
   var btnLevels = document.getElementById('btn-levels');
   var btnLevelsBack = document.getElementById('btn-levels-back');
   var lvTotal = document.getElementById('lv-total');
+  var buildBadge = document.getElementById('build-badge');
+
+  // Плашка номера билда (стандарт с 2026-07-25): текст ставим сразу, не
+  // дожидаясь Platform.init() — это статическая метка сборки, не данные
+  // платформы. window.BUILD подставляет build.py (маркер BUILD_INFO в
+  // index.html); вне билда (локальная разработка) остаётся 'dev'.
+  if (buildBadge) buildBadge.textContent = window.BUILD || 'dev';
 
   var soundOn = true;
   var currentIndex = 0;  // индекс текущего уровня
@@ -103,7 +110,10 @@
     if (!level) return;
     var isLast = !Levels.get(index + 1);
     currentIndex = index;
-    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1) + ' / ' + Levels.count();
+    // Знаменатель (общее число уровней) игроку НЕ показываем нигде во
+    // внутриигровом UI (железный стандарт студии) — только «Уровень N».
+    // Сетка выбора уровня — исключение, там числа это навигация, не обещание конца.
+    gameLevel.textContent = I18N.t('level') + ' ' + (index + 1);
     gameTheme.textContent = level.theme;
     gameCounter.textContent = '0 / ' + level.words.length;
     elWin.hidden = true;
