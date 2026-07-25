@@ -30,12 +30,22 @@ html, body {
   overscroll-behavior: none;
   background-color: var(--bg);
   /* Слой 1 — мягкое свечение под курсором (центр двигает JS, на телефоне не видно).
-     Слой 2 — еле заметная «бумажная» крупка, чтобы фон не был плоским. */
+     Слой 2 — «бумажная» крупка, чуть плотнее прежнего, чтобы фон не был плоским.
+     Слой 3 — тонкое волокно бумаги: диагональные линии под небольшим углом
+     (не 0/90°, чтобы не читалось как экранная сетка), на грани заметности —
+     держим её тон (rgba(80,60,30,…)) той же охрой, что и крупка, никаких
+     новых цветов. Альфа линии специально мала (0.02, не 0.035, как в первой
+     версии): на редком пикселе, где крупка и линия совпадают, фон темнеет
+     сильнее всего — посчитано (WCAG, node), там контраст подписи (--text-dim)
+     ~2.9->2.7 (уже был ~2.9 ДО этого слоя — подпись изначально декоративная,
+     приглушённая; заголовок (--text) остаётся ~10.7, с огромным запасом).
+     Дальше растить альфу линии не стоит — это и так на грани "не переборщить". */
   background-image:
     radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 62%),
-    radial-gradient(circle, rgba(80,60,30,0.05) 1px, transparent 1.5px);
-  background-size: auto, 22px 22px;
-  background-repeat: no-repeat, repeat;
+    radial-gradient(circle, rgba(80,60,30,0.07) 1px, transparent 1.5px),
+    repeating-linear-gradient(115deg, rgba(80,60,30,0.02) 0px, rgba(80,60,30,0.02) 1px, transparent 1px, transparent 5px);
+  background-size: auto, 20px 20px, auto;
+  background-repeat: no-repeat, repeat, repeat;
   color: var(--text);
   font-family: Georgia, "PT Serif", "Times New Roman", serif;
   user-select: none;
@@ -95,7 +105,13 @@ html, body {
   max-width: 320px;
 }
 
-/* Крупные тап-цели (п.1.8) — минимум 56px по высоте. */
+/* Крупные тап-цели (п.1.8) — минимум 56px по высоте.
+   Иерархия: primary (Продолжить) — гуще заливка + плотнее тень, тянет взгляд;
+   secondary (Уровни) — бледнее, тонкая обводка/тень, читается как второй план.
+   Тени — в тон «чернил» (var(--text) = #2b2723 → rgba(43,39,35,…)), мягкие,
+   без резких краёв. :hover — ТОЛЬКО там, где есть настоящий указатель
+   (hover:hover и pointer:fine) — иначе на тапе он «залипает» после отпускания
+   пальца (устройство без hover try). :active — работает везде (в т.ч. на тач). */
 .btn {
   appearance: none;
   border: 0;
@@ -105,11 +121,27 @@ html, body {
   font-size: 18px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.06s ease, filter 0.15s ease;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background-color 0.15s ease, filter 0.15s ease;
 }
-.btn:active { transform: scale(0.98); }
-.btn-primary { background: var(--accent2); color: #f6efdd; }
-.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--tile-border); }
+.btn-primary {
+  background: var(--accent2);
+  color: var(--accent-ink);
+  box-shadow: 0 4px 10px rgba(43,39,35,0.22);
+}
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--tile-border);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 6px rgba(43,39,35,0.08);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover   { box-shadow: 0 6px 16px rgba(43,39,35,0.28); transform: translateY(-2px); }
+  .btn-secondary:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 4px 10px rgba(43,39,35,0.14); border-color: var(--accent2); transform: translateY(-1px); }
+  .sound-toggle:hover   { box-shadow: 0 3px 8px rgba(43,39,35,0.12); border-color: var(--accent2); transform: translateY(-1px); }
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary:active   { box-shadow: 0 2px 6px rgba(43,39,35,0.18); filter: brightness(0.93); }
+.btn-secondary:active { box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 1px 3px rgba(43,39,35,0.08); background: var(--accent2-tint); }
 
 .sound-toggle {
   position: absolute;
@@ -122,8 +154,11 @@ html, body {
   color: var(--text);
   font-size: 20px;
   cursor: pointer;
+  box-shadow: 0 2px 6px rgba(43,39,35,0.08);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 .sound-toggle.is-muted { color: var(--text-dim); }
+.sound-toggle:active { transform: scale(0.92); background: var(--accent2-tint); box-shadow: 0 1px 3px rgba(43,39,35,0.06); }
 
 .dev-badge {
   position: absolute;
