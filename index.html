@@ -16,7 +16,7 @@
   <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
        window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
        заменяется: main.js покажет плашку "dev" вместо номера. -->
-  <script>window.BUILD = 'vk-b5-9d38cf5-20260725';</script>
+  <script>window.BUILD = 'vk-b6-e755701-20260725';</script>
 </head>
 <body>
   <div id="app">
@@ -40,15 +40,6 @@
       </nav>
 
       <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
-
-      <!-- Подтверждение сброса прогресса -->
-      <div id="confirm" class="overlay" hidden>
-        <div class="overlay-card">
-          <p class="overlay-title" data-i18n="confirmTitle">Прогресс сбросится. Начать заново?</p>
-          <button id="btn-restart-yes" class="btn btn-primary" data-i18n="confirmYes">Начать заново</button>
-          <button id="btn-restart-no" class="btn btn-secondary" data-i18n="confirmNo">Отмена</button>
-        </div>
-      </div>
 
       <p id="dev-badge" class="dev-badge" hidden>dev-режим: платформа не подключена</p>
     </section>
@@ -119,11 +110,11 @@
        текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
   <div id="build-badge" aria-hidden="true"></div>
 
-  <script src="i18n.js?v=2"></script>
+  <script src="i18n.js?v=6"></script>
   <script src="platform.js?v=2"></script>
-  <script src="levels.js"></script>
+  <script src="levels.js?v=6"></script>
   <script src="board.js"></script>
   <script src="sound.js"></script>
-  <script src="main.js?v=5"></script>
+  <script src="main.js?v=6"></script>
 </body>
 </html>

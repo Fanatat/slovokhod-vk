@@ -25,9 +25,6 @@
   var elWinNew   = document.getElementById('win-new');
   var btnNext = document.getElementById('btn-next');
   var btnHint = document.getElementById('btn-hint');
-  var elConfirm = document.getElementById('confirm');
-  var btnRestartYes = document.getElementById('btn-restart-yes');
-  var btnRestartNo = document.getElementById('btn-restart-no');
   var elTutorial = document.getElementById('tutorial');
   var btnTutorialOk = document.getElementById('btn-tutorial-ok');
   var elWordList = document.getElementById('word-list');
@@ -70,12 +67,11 @@
   }
 
   // Вид меню в зависимости от наличия прогресса.
-  // Есть прогресс → «Продолжить» главная, «Играть» становится «Начать сначала» (вторичная).
+  // Есть прогресс → «Продолжить» главная, «Играть» скрыта («Начать сначала»
+  // убрана из меню — свежий старт с 1-го уровня доступен через «Выбор уровня»).
   function setMenuProgress(has) {
     btnContinue.hidden = !has;
-    btnContinue.className = 'btn ' + (has ? 'btn-primary' : 'btn-secondary');
-    btnPlay.className = 'btn ' + (has ? 'btn-secondary' : 'btn-primary');
-    btnPlay.textContent = has ? I18N.t('restart') : I18N.t('play');
+    btnPlay.hidden = has;
   }
 
   // Подпись кнопки подсказки: обещает ролик только если реклама реально
@@ -312,24 +308,12 @@
 
   // --- Обработчики меню ---
 
+  // «Играть» видна только когда прогресса ещё нет (см. setMenuProgress) —
+  // сброс-с-подтверждением убран из меню, свежий старт доступен через
+  // «Выбор уровня» (клик по 1-му уровню).
   btnPlay.addEventListener('click', function () {
     Sound.resumeContext();   // разрешаем звук по действию пользователя
-    if (savedIndex != null && savedIndex > 0) {
-      elConfirm.hidden = false;   // есть прогресс → спросить перед сбросом
-    } else {
-      openLevel(0);
-    }
-  });
-
-  btnRestartYes.addEventListener('click', function () {
-    elConfirm.hidden = true;
-    savedIndex = null;
-    setMenuProgress(false);
-    openLevel(0);   // старт с 1-го уровня, сохранение перезапишется
-  });
-
-  btnRestartNo.addEventListener('click', function () {
-    elConfirm.hidden = true;
+    openLevel(0);
   });
 
   btnBack.addEventListener('click', function () {
