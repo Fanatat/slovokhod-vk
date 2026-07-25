@@ -18,6 +18,16 @@
   --radius: 14px;
 }
 
+/* Косметика (задача В): альт-тема «Мятная бумага» — та же бумажная основа,
+   акцент сменён с глины на мяту. Перекраска дешёвая — те же переменные. */
+html.theme-alt {
+  --surface: #f5faf1;
+  --tile-border: #cfe0c9;
+  --accent2: #2c6e63;
+  --accent2-tint: #d6ece5;
+  --accent2-ink: #163f36;
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 /* Запрет браузерного скролла, свайпа-обновления и выделения текста.
@@ -275,6 +285,25 @@ html, body {
 .win-new   { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent2-ink); background: var(--accent2-tint); border: 1px solid var(--accent2); border-radius: 20px; padding: 3px 12px; margin: 8px 0 0; }
 .win-new[hidden] { display: none; }
 .lv-total  { margin-left: auto; font-size: 13px; color: var(--text-dim); }
+
+/* Витрина косметики (задача В). Превью — те же CSS-переменные альт-темы,
+   но скопированы только внутри контейнера: показываем цвета БЕЗ переключения
+   всего приложения на новую тему. */
+.theme-alt-preview {
+  --surface: #f5faf1;
+  --accent2: #2c6e63;
+  --accent2-tint: #d6ece5;
+}
+.theme-preview { display: flex; gap: 10px; justify-content: center; margin: 4px 0 16px; }
+.theme-swatch {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--tile-border);
+  display: inline-block;
+}
+.theme-shop-status { font-size: 13px; color: var(--text-dim); margin: 0 0 16px; }
+#theme-shop .btn { width: 100%; margin-top: 8px; }
+#theme-shop .btn:first-of-type { margin-top: 0; }
 
 /* Фаза 5 — подсказка. */
 .cell.hint { box-shadow: inset 0 0 0 3px #f59e0b; }  /* янтарная рамка = подсказанная буква */
