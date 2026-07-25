@@ -19,18 +19,21 @@
    При провале — dev-режим (isAvailable=false, dev-бейдж, игра без сейва/рекламы).
    Стандарт студии: вечная загрузка запрещена в любом окружении.
 
-   Маппинг контракта v3:
+   Маппинг контракта v3 (задача Б добавила showBanner; canPurchase/purchase
+   держим в контракте как задел — в этой сборке (A+B) их никто не вызывает,
+   витрины косметики нет, см. отдельную задачу В):
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
                                  + VKWebAppCheckNativeAds (доступность rewarded)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
      getLang()                 → URL-параметр vk_language или navigator.language
      isAvailable()             → флаг ready после успешного init
      isRewardedAvailable()     → VKWebAppCheckNativeAds {ad_format:'reward'} (кешируется при init).
-                                 ТОЛЬКО для подписи кнопки (задача А, п.180) — кнопка подсказки
-                                 в main.js больше НЕ прячется по этому флагу: сама проверка
-                                 исторически ненадёжна (ложные false при adblock — известный баг
-                                 VKWebAppCheckNativeAds, github.com/VKCOM/vk-bridge/issues/243),
-                                 а при false подсказка выдаётся бесплатно без попытки показать ролик.
+                                 ТОЛЬКО для подписи кнопки (задача А, п.180) — main.js
+                                 больше НЕ прячет кнопку подсказки по этому флагу: сама
+                                 проверка исторически ненадёжна (ложные false при adblock —
+                                 известный баг VKWebAppCheckNativeAds, github.com/VKCOM/
+                                 vk-bridge/issues/243), а при false подсказка выдаётся
+                                 бесплатно без попытки показать ролик.
                                  dev-режим (!ready) → true (label "за рекламу" для тестирования)
      save(fullState)           → VKWebAppStorageSet {key, value}
      load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value
@@ -40,9 +43,8 @@
      showBanner()               → VKWebAppShowBannerAd {banner_location:'top', layout_type:'resize'}.
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
                                  interstitial/rewarded, вызывается один раз при старте.
-     canPurchase()              → true (платформенная поддержка ИНАП, задача В)
-     purchase(itemId)           → VKWebAppShowOrderBox {type:'item', item:itemId}
-                                 → {success: status==='success'}; товар настраивается в кабинете ВК
+     canPurchase()/purchase()   → присутствуют в контракте (см. примечание выше), в этой
+                                 сборке main.js их не вызывает.
      gameplayStart/Stop        → no-op
    Доки/типы VK Bridge проверены по исходникам пакета:
    https://github.com/VKCOM/vk-bridge/blob/master/packages/core/src/types/data.ts
@@ -50,20 +52,6 @@
 window.Platform = (() => {
   const STORAGE_KEY   = 'filword_save';
   const INIT_TIMEOUT  = 2500;   // мс — после этого уходим в dev-режим
-  // Сторож байтов перед записью (см. ЖЁСТКИЕ ОГРАНИЧЕНИЯ задачи Б/В):
-  // известный баг VKWebAppStorageSet — JSON-значения обрезаются молча
-  // на ~2236 байт вместо заявленных для строк 4096 (github.com/VKCOM/
-  // vk-bridge/issues/226). Порог взят с запасом ниже задокументированного
-  // сбоя: превышение — сейв целиком пропускается (не пишем усечённый
-  // объект, который потом не распарсится при load()).
-  const SAVE_BYTE_LIMIT = 2000;
-
-  // Dev-фолбэк на localStorage (см. save/load ниже): активен ТОЛЬКО
-  // когда ready === false. ready становится true ровно в одном месте —
-  // внутри init(), и только после успешного vkBridge.send('VKWebAppInit').
-  // При живом Bridge этот путь физически недостижим: та же переменная,
-  // что гейтит showInterstitial/showRewarded/isAvailable() ниже.
-  const DEV_SAVE_KEY = 'slovohod_dev_save_vk';
 
   function hasBridge() {
     return typeof vkBridge !== 'undefined';
@@ -156,29 +144,13 @@ window.Platform = (() => {
      VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK. */
   async function save(fullState) {
     if (!ready) {
-      // Dev-режим: нет живого Bridge — фолбэк на localStorage, чтобы
-      // «сохранил → перезагрузил» было проверяемо на СОБРАННОМ архиве
-      // (index.html открыт напрямую/standalone, без реального VK).
-      try {
-        localStorage.setItem(DEV_SAVE_KEY, JSON.stringify(fullState));
-      } catch (e) {
-        console.warn('[platform] dev-режим: localStorage недоступен', e);
-      }
-      return;
-    }
-    const value = JSON.stringify(fullState);
-    const bytes = new TextEncoder().encode(value).length;
-    if (bytes > SAVE_BYTE_LIMIT) {
-      console.error(
-        '[platform] сейв превышает безопасный лимит VKWebAppStorageSet (' +
-        bytes + ' > ' + SAVE_BYTE_LIMIT + ' байт) — запись ПРОПУЩЕНА целиком', fullState,
-      );
+      console.warn('[platform] dev-режим: сейв пропущен');
       return;
     }
     try {
       await vkBridge.send('VKWebAppStorageSet', {
         key:   STORAGE_KEY,
-        value: value,
+        value: JSON.stringify(fullState),
       });
     } catch (e) {
       console.error('[platform] StorageSet ошибка:', e);
@@ -186,15 +158,7 @@ window.Platform = (() => {
   }
 
   async function load() {
-    if (!ready) {
-      try {
-        const raw = localStorage.getItem(DEV_SAVE_KEY);
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) {
-        console.warn('[platform] dev-режим: localStorage недоступен', e);
-        return null;
-      }
-    }
+    if (!ready) return null;
     try {
       const res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
       const raw = res.keys && res.keys[0] && res.keys[0].value;
@@ -246,8 +210,8 @@ window.Platform = (() => {
      interstitial/rewarded в main.js и не требует показа по клику.
      layout_type:'resize' — клиент VK сам уменьшает область мини-аппа под
      баннер, вручную резервировать место в CSS не нужно.
-     https://dev.vk.com/bridge/VKWebAppShowBannerAd — params сверены по
-     исходникам @vkontakte/vk-bridge (packages/core/src/types/data.ts). */
+     Params сверены по исходникам @vkontakte/vk-bridge
+     (packages/core/src/types/data.ts): ShowBannerAdRequest. */
   function showBanner() {
     if (!ready) {
       console.warn('[platform] dev: banner пропущен');
@@ -263,12 +227,10 @@ window.Platform = (() => {
     });
   }
 
-  /* ---------- Косметические покупки (задача В) ----------
-     canPurchase() — платформенная возможность (эта площадка вообще умеет
-     показывать VKWebAppShowOrderBox), а не проверка наличия конкретного
-     товара в кабинете — её нет в API. Как и с isRewardedAvailable() выше,
-     не пытаемся угадать доступность заранее: клик сам обнаружит отсутствие
-     товара через status !== 'success' и даст безопасный фолбэк без краша.
+  /* ---------- Косметические покупки ----------
+     Присутствуют в контракте про запас (см. заголовок файла) — эта сборка
+     (задачи А+Б) их не вызывает, витрины нет. canPurchase() — платформенная
+     возможность, а не проверка наличия конкретного товара (её нет в API).
      https://github.com/VKCOM/vk-bridge (packages/core/src/types/data.ts:
      OrderRequestOptions {type:'item', item}, статус 'cancel'|'success'|'fail'). */
   function canPurchase() { return true; }
@@ -282,8 +244,6 @@ window.Platform = (() => {
       const res = await vkBridge.send('VKWebAppShowOrderBox', { type: 'item', item: itemId });
       return { success: res && res.status === 'success' };
     } catch (e) {
-      // Товара нет в кабинете / платежи не настроены / ошибка сети —
-      // штатный фолбэк, НЕ бросаем исключение выше (main.js ждёт Promise).
       console.warn('[platform] purchase недоступна:', e);
       return { success: false };
     }
