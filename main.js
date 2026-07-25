@@ -37,6 +37,13 @@
   var btnLevels = document.getElementById('btn-levels');
   var btnLevelsBack = document.getElementById('btn-levels-back');
   var lvTotal = document.getElementById('lv-total');
+  var btnTheme = document.getElementById('btn-theme');
+  var elThemeShop = document.getElementById('theme-shop');
+  var themeShopStatus = document.getElementById('theme-shop-status');
+  var btnThemeBuy = document.getElementById('btn-theme-buy');
+  var btnThemeApply = document.getElementById('btn-theme-apply');
+  var btnThemeRevert = document.getElementById('btn-theme-revert');
+  var btnThemeClose = document.getElementById('btn-theme-close');
 
   var soundOn = true;
   var currentIndex = 0;  // индекс текущего уровня
@@ -48,13 +55,26 @@
   var tutorialShown = false; // туториал: показываем один раз за сессию
   var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
 
-  // Гейт частоты interstitial (п.4.7): каждый 3-й уровень И не чаще раза
-  // в 90 сек — оба условия обязательны. Это ЕДИНСТВЕННАЯ подтверждённая
+  // Косметическая покупка (задача В, смена стандарта п.81): альт-палитра
+  // «мятная бумага». Идентификатор товара — соответствует Item в кабинете ВК
+  // (создаётся основателем, см. отчёт). Разблокировка витрины — после
+  // прохождения THEME_UNLOCK_LEVEL уровней (нижняя граница диапазона 2-5).
+  var THEME_ITEM_ID = 'slovohod_theme_mint';
+  var THEME_UNLOCK_LEVEL = 3;
+  var ownedThemeAlt = false;
+  var activeTheme = 'default'; // 'default' | 'alt'
+
+  // Гейт частоты interstitial (п.4.7): каждый 2-й уровень И не чаще раза
+  // в 60 сек — оба условия обязательны. Это ЕДИНСТВЕННАЯ подтверждённая
   // защита от частых показов: наличие платформенного троттлинга
   // (Яндекс/VK) первоисточником НЕ подтверждено на 19.07.2026 — не
   // полагаться на него, пока не появится документальное подтверждение.
-  var AD_LEVEL_GATE = 3;
-  var AD_MIN_INTERVAL_MS = 90000;
+  // Было 3/90с — за 41 запуск на ВК 0 показов: короткие тестовые сессии,
+  // видимо, не успевали набрать 3 уровня с 90с зазором. Сужено до 2/60с
+  // (нижняя граница диапазона задачи Б) ради большего числа возможностей
+  // показа; сама реклама остаётся необязательной (fill не гарантирован).
+  var AD_LEVEL_GATE = 2;
+  var AD_MIN_INTERVAL_MS = 60000;
   var levelsSinceAd = 0;
   var lastAdShownAt = 0;
 
@@ -72,6 +92,97 @@
     btnPlay.className = 'btn ' + (has ? 'btn-secondary' : 'btn-primary');
     btnPlay.textContent = has ? I18N.t('restart') : I18N.t('play');
   }
+
+  // Подпись кнопки подсказки: обещает ролик только если реклама реально
+  // доступна (п.180) — кнопка сама всегда видна, см. start().
+  function updateHintLabel() {
+    if (!btnHint) return;
+    btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
+  }
+
+  // Применяет косметическую тему (или возвращает обычную «бумагу»).
+  // CSS-переменные переопределены в style.css классом html.theme-alt.
+  function applyTheme(theme) {
+    activeTheme = theme;
+    document.documentElement.classList.toggle('theme-alt', theme === 'alt');
+  }
+
+  // Текущее полное состояние прогресса — для целостного сейва (сейв ОБЪЕКТОМ
+  // ЦЕЛИКОМ, ни одно поле не пишем частично).
+  function saveState() {
+    Platform.save({
+      level: currentIndex,
+      max: maxUnlocked,
+      records: records,
+      owned: { theme_alt: ownedThemeAlt },
+      activeTheme: activeTheme,
+    });
+  }
+
+  // Кнопка витрины видна только когда покупки поддерживает площадка (ВК)
+  // И игрок прошёл достаточно уровней (задача В: разблокировка 2-5 уровней).
+  function updateThemeButtonVisibility() {
+    if (!btnTheme) return;
+    btnTheme.hidden = !(Platform.canPurchase() && maxUnlocked >= THEME_UNLOCK_LEVEL);
+  }
+
+  // Состояние витрины: локальная подпись + какие кнопки показывать.
+  function updateThemeShopUI() {
+    if (!elThemeShop) return;
+    if (ownedThemeAlt) {
+      if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeOwned');
+      if (btnThemeBuy) btnThemeBuy.hidden = true;
+      if (btnThemeApply)  btnThemeApply.hidden  = activeTheme === 'alt';
+      if (btnThemeRevert) btnThemeRevert.hidden = activeTheme !== 'alt';
+    } else {
+      if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeBuyHint');
+      if (btnThemeBuy) btnThemeBuy.hidden = false;
+      if (btnThemeApply)  btnThemeApply.hidden  = true;
+      if (btnThemeRevert) btnThemeRevert.hidden = true;
+    }
+  }
+
+  if (btnTheme) btnTheme.addEventListener('click', function () {
+    Sound.resumeContext();
+    updateThemeShopUI();
+    elThemeShop.hidden = false;
+  });
+
+  if (btnThemeClose) btnThemeClose.addEventListener('click', function () {
+    elThemeShop.hidden = true;
+  });
+
+  if (btnThemeBuy) btnThemeBuy.addEventListener('click', function () {
+    btnThemeBuy.disabled = true;
+    if (themeShopStatus) themeShopStatus.textContent = I18N.t('themePending');
+    Platform.purchase(THEME_ITEM_ID).then(function (res) {
+      btnThemeBuy.disabled = false;
+      if (res && res.success) {
+        ownedThemeAlt = true;
+        applyTheme('alt');
+        saveState();
+        updateThemeShopUI(); // владение изменилось — переключить купить → применить/вернуть
+      } else {
+        // Отмена / нет товара в кабинете / ошибка сети — тихий фолбэк,
+        // игра не падает (см. НЕ ДЕЛАТЬ / предусловие основателя в задаче В).
+        // updateThemeShopUI() здесь НЕ зовём: она сбросила бы это сообщение
+        // обратно на themeBuyHint, т.к. ownedThemeAlt всё ещё false.
+        if (themeShopStatus) themeShopStatus.textContent = I18N.t('themeUnavailable');
+      }
+    });
+  });
+
+  if (btnThemeApply) btnThemeApply.addEventListener('click', function () {
+    applyTheme('alt');
+    saveState();
+    updateThemeShopUI();
+  });
+
+  if (btnThemeRevert) btnThemeRevert.addEventListener('click', function () {
+    applyTheme('default');
+    saveState();
+    updateThemeShopUI();
+  });
 
   function renderWordList(level) {
     if (!elWordList) return;
@@ -107,7 +218,7 @@
 
     // Сохраняем прогресс (текущий уровень). Переживает обновление страницы (п.1.9).
     maxUnlocked = Math.max(maxUnlocked, index);
-    Platform.save({ level: index, max: maxUnlocked, records: records });
+    saveState();
     // Держим «Продолжить» в актуальном состоянии в течение сессии.
     savedIndex = index;
     if (index > 0) setMenuProgress(true);
@@ -155,7 +266,8 @@
         records.total = tot;
         // Разблокировать следующий уровень и сохранить.
         maxUnlocked = Math.min(Levels.count() - 1, Math.max(maxUnlocked, currentIndex + 1));
-        Platform.save({ level: currentIndex, max: maxUnlocked, records: records });
+        saveState();
+        updateThemeButtonVisibility();
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
         setTimeout(function () {
@@ -271,12 +383,22 @@
       I18N.apply(document);
 
       if (!Platform.isAvailable() && devBadge) devBadge.hidden = false;
-      if (btnHint) btnHint.hidden = !Platform.isRewardedAvailable();
+      // Кнопка подсказки НИКОГДА не прячется (смена стандарта п.180): при
+      // adblock/отсутствии филла VKWebAppCheckNativeAds исторически ложно
+      // сообщает "недоступно" даже когда реклама реально показывается —
+      // прятать кнопку по этому сигналу нельзя. Подпись лишь не обещает
+      // ролик, если реклама недоступна; сама подсказка в этом случае бесплатна.
+      updateHintLabel();
 
       showScreen(elMenu);
 
       // Game Ready — ровно сейчас: меню отрисовано и интерактивно.
       Platform.gameReady();
+
+      // Стики-баннер (задача Б): гарантированная рекламная поверхность,
+      // не зависящая от гейта interstitial/rewarded. No-op на площадках
+      // без поддержки — метод обязан существовать в контракте у всех.
+      Platform.showBanner();
 
       // Прогресс грузим параллельно, чтобы не задерживать Game Ready.
       Platform.load().then(function (data) {
@@ -289,6 +411,13 @@
         if (data && data.records && typeof data.records.levels === 'object') {
           records = { levels: data.records.levels, total: data.records.total || 0 };
         }
+        // Владение косметикой (задача В); старые сохранения без поля owned
+        // не ломают игру — просто считаем тему некупленной.
+        if (data && data.owned && data.owned.theme_alt === true) {
+          ownedThemeAlt = true;
+          applyTheme(data.activeTheme === 'alt' ? 'alt' : 'default');
+        }
+        updateThemeButtonVisibility();
       });
     });
   }
@@ -378,8 +507,15 @@
   });
 
   // Подсказка за rewarded-видео (п.4.5): по желанию смотрим ролик → подсвечивается буква.
+  // Если реклама недоступна (adblock/нет филла) — подсказка бесплатна (п.190),
+  // ролик не пытаемся показывать вовсе: кнопка это уже честно не обещает.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
+    if (!Platform.isRewardedAvailable()) {
+      hintsUsed++;
+      Board.revealHint(hintWord);
+      return;
+    }
     Platform.showRewarded(
       function () { hintsUsed++; Board.revealHint(hintWord); }, // onRewarded — chain[chainPos]
       function () { Sound.suspend(); },                  // onPause
