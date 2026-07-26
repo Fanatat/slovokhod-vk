@@ -18,6 +18,23 @@
   --radius: 14px;
 }
 
+/* Косметическая тема «Мятная бумага» (задача 1, ИНАП): та же структура
+   переменных, что и базовая палитра выше — переключение темы это только
+   смена значений, разметка и логика не знают о цвете. Активируется через
+   data-theme="mint" на <html> (main.js: applyTheme()). */
+:root[data-theme="mint"] {
+  --bg: #e9f1e6;
+  --surface: #f5faf2;
+  --tile-border: #d3e4cd;
+  --text: #23342a;
+  --text-dim: #7e9184;
+  --accent: #23342a;
+  --accent-ink: #eef7ea;
+  --accent2: #3f8f5f;
+  --accent2-tint: #dcefe0;
+  --accent2-ink: #1f5c3a;
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 /* Запрет браузерного скролла, свайпа-обновления и выделения текста.
@@ -519,4 +536,39 @@ html, body {
 }
 .lv-tile:active { transform: scale(0.96); }
 .lv-tile.locked { opacity: .5; pointer-events: none; }
+
+/* ============================================================
+   Экран магазина косметики (задача 1, ИНАП: «Мятная бумага»).
+   ============================================================ */
+#store.screen {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+}
+.store-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 24px 16px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: var(--radius);
+}
+.store-swatch {
+  appearance: none;
+  border: 1px solid var(--tile-border);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  cursor: pointer;
+  background: transparent;
+}
+.swatch-dot { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--tile-border); }
+.store-item-name { font-weight: 600; font-size: 16px; color: var(--text); }
+.store-status { font-size: 13px; color: var(--text-dim); }
+.store-status.is-error { color: var(--accent2-ink); }
 .lv-tile.current { border: 2px solid var(--accent2); }

@@ -19,9 +19,9 @@
    При провале — dev-режим (isAvailable=false, dev-бейдж, игра без сейва/рекламы).
    Стандарт студии: вечная загрузка запрещена в любом окружении.
 
-   Маппинг контракта v3 (задача Б добавила showBanner; canPurchase/purchase
-   держим в контракте как задел — в этой сборке (A+B) их никто не вызывает,
-   витрины косметики нет, см. отдельную задачу В):
+   Маппинг контракта v3 (задача Б добавила showBanner; задача 1/2 подключила
+   витрину косметики «Мятная бумага» — canPurchase/purchase теперь реально
+   вызываются из main.js):
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
                                  + VKWebAppCheckNativeAds (доступность rewarded)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
@@ -43,8 +43,11 @@
      showBanner()               → VKWebAppShowBannerAd {banner_location:'top', layout_type:'resize'}.
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
                                  interstitial/rewarded, вызывается один раз при старте.
-     canPurchase()/purchase()   → присутствуют в контракте (см. примечание выше), в этой
-                                 сборке main.js их не вызывает.
+     canPurchase()/purchase()   → VKWebAppShowOrderBox {type:'item', item}; клиентский
+                                 статус ('success') сверяется с GAME_CONFIG.vkOrderVerifyUrl
+                                 (сервер получает уведомление ВК и подтверждает списание) —
+                                 без сервера или при его недоступности покупка НЕ считается
+                                 успешной (без ложного success), см. комментарий у purchase().
      gameplayStart/Stop        → no-op
    Доки/типы VK Bridge проверены по исходникам пакета:
    https://github.com/VKCOM/vk-bridge/blob/master/packages/core/src/types/data.ts
@@ -141,16 +144,41 @@ window.Platform = (() => {
   }
 
   /* ---------- Сохранение ----------
-     VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK. */
+     VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK.
+
+     Сторож байтов (реинтродукция задачи 1: раньше был вырезан вместе с
+     запаркованным ИНАП в a73863c — тогда порог был угадан по внешнему
+     issue, без реального замера, и решили не тащить угаданное число на
+     модерацию). Теперь замерено по факту (node, 2026-07-26): худший
+     реалистичный сейв (100/100 уровней пройдены с рекордами + owned +
+     theme) = 980 байт. Документированный лимит VKWebAppStorageSet — 4096
+     байт, но по факту JSON-сериализованные объекты обрезаются на ~2236
+     байт (github.com/VKCOM/vk-bridge/issues/226, подтверждено). Порог
+     ниже взят с запасом ~60% ниже реального сбоя и вдвое выше нашего
+     максимума — расти в этом проекте почти некуда (уровни статичны,
+     records растёт линейно и уже посчитан на все 100). Превышение —
+     сейв целиком пропускается (не пишем усечённый объект, который потом
+     не распарсится при load()). */
+  const SAVE_BYTE_LIMIT = 1600;
+
   async function save(fullState) {
     if (!ready) {
       console.warn('[platform] dev-режим: сейв пропущен');
       return;
     }
+    const value = JSON.stringify(fullState);
+    const bytes = new TextEncoder().encode(value).length;
+    if (bytes > SAVE_BYTE_LIMIT) {
+      console.error(
+        '[platform] сейв превышает безопасный лимит VKWebAppStorageSet (' +
+        bytes + ' > ' + SAVE_BYTE_LIMIT + ' байт) — запись ПРОПУЩЕНА целиком', fullState,
+      );
+      return;
+    }
     try {
       await vkBridge.send('VKWebAppStorageSet', {
         key:   STORAGE_KEY,
-        value: JSON.stringify(fullState),
+        value: value,
       });
     } catch (e) {
       console.error('[platform] StorageSet ошибка:', e);
@@ -227,25 +255,57 @@ window.Platform = (() => {
     });
   }
 
-  /* ---------- Косметические покупки ----------
-     Присутствуют в контракте про запас (см. заголовок файла) — эта сборка
-     (задачи А+Б) их не вызывает, витрины нет. canPurchase() — платформенная
-     возможность, а не проверка наличия конкретного товара (её нет в API).
+  /* ---------- Косметические покупки (задача 1/2, ИНАП «Мятная бумага») ----------
+     canPurchase() — платформенная возможность, а не проверка наличия
+     конкретного товара (её нет в API).
      https://github.com/VKCOM/vk-bridge (packages/core/src/types/data.ts:
-     OrderRequestOptions {type:'item', item}, статус 'cancel'|'success'|'fail'). */
+     OrderRequestOptions {type:'item', item}, статус 'cancel'|'success'|'fail').
+
+     purchase(): VKWebAppShowOrderBox — статус в ответе СИНХРОННЫЙ и приходит
+     с клиента, он НЕ подтверждает реальное списание (клиент подделываем).
+     Реальное подтверждение — уведомление ВК на сервер разработчика
+     (dev.vk.com/ru/api/payments/notifications), поэтому после успешного
+     клиентского статуса дополнительно сверяемся с сервером через
+     GAME_CONFIG.vkOrderVerifyUrl. Пусто/недоступен → покупка НЕ считается
+     успешной (без ложного success), игрок видит понятную ошибку, игра не
+     виснет — см. main.js (storeErrorServer). */
   function canPurchase() { return true; }
 
   async function purchase(itemId) {
     if (!ready) {
-      console.warn('[platform] dev: purchase → успех симулирован');
+      console.warn('[platform] dev: purchase → успех симулирован (сервер не нужен в dev-режиме)');
       return { success: true };
     }
+
+    let orderRes;
     try {
-      const res = await vkBridge.send('VKWebAppShowOrderBox', { type: 'item', item: itemId });
-      return { success: res && res.status === 'success' };
+      orderRes = await vkBridge.send('VKWebAppShowOrderBox', { type: 'item', item: itemId });
     } catch (e) {
-      console.warn('[platform] purchase недоступна:', e);
-      return { success: false };
+      console.warn('[platform] purchase: OrderBox отменён/ошибка:', e);
+      return { success: false, error: 'order_failed' };
+    }
+    if (!orderRes || orderRes.status !== 'success') {
+      return { success: false, error: 'order_' + ((orderRes && orderRes.status) || 'unknown') };
+    }
+
+    const verifyUrl = window.GAME_CONFIG && window.GAME_CONFIG.vkOrderVerifyUrl;
+    if (!verifyUrl) {
+      console.warn('[platform] purchase: сервер верификации не настроен (config.js пуст) — покупка НЕ подтверждена');
+      return { success: false, error: 'server_unreachable' };
+    }
+
+    try {
+      const timeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000));
+      const resp = await Promise.race([
+        fetch(verifyUrl + '?item=' + encodeURIComponent(itemId)),
+        timeoutP,
+      ]);
+      if (!resp.ok) throw new Error('http ' + resp.status);
+      const body = await resp.json();
+      return { success: body && body.owned === true };
+    } catch (e) {
+      console.warn('[platform] purchase: сервер верификации недоступен:', e);
+      return { success: false, error: 'server_unreachable' };
     }
   }
 

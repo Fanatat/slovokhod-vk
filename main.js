@@ -35,6 +35,12 @@
   var btnLevelsBack = document.getElementById('btn-levels-back');
   var lvTotal = document.getElementById('lv-total');
   var buildBadge = document.getElementById('build-badge');
+  var elStore = document.getElementById('store');
+  var btnStore = document.getElementById('btn-store');
+  var btnStoreBack = document.getElementById('btn-store-back');
+  var storePreviewMint = document.getElementById('store-preview-mint');
+  var storeBuyMint = document.getElementById('store-buy-mint');
+  var storeStatusMint = document.getElementById('store-status-mint');
 
   // Плашка номера билда (стандарт с 2026-07-25): текст ставим сразу, не
   // дожидаясь Platform.init() — это статическая метка сборки, не данные
@@ -52,13 +58,56 @@
   var tutorialShown = false; // туториал: показываем один раз за сессию
   var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
 
-  // Гейт частоты interstitial (задача Б, п.4.7): каждый 2-й уровень И не
-  // чаще раза в 60 сек — оба условия обязательны. Гейт живёт в памяти
-  // сессии (не в сейве) — на новый запуск игры счётчик сбрасывается.
-  var AD_LEVEL_GATE = 2;
-  var AD_MIN_INTERVAL_MS = 60000;
+  // Косметика (задача 1, ИНАП «Мятная бумага»). Витрина открывается после
+  // N пройденных уровней — ПРЕДЛОЖЕНО 3 (диапазон 2-5 из ТЗ), число не
+  // подтверждено основателем, см. отчёт задачи.
+  var STORE_UNLOCK_AFTER_LEVELS = 3;
+  var MINT_ITEM_ID = 'slovohod_theme_mint';
+  var owned = [];             // купленные темы, напр. ['mint']
+  var activeTheme = 'default'; // применённая тема
+  var previewingMint = false; // временное превью на экране магазина (не сохраняется)
+
+  // Гейт частоты interstitial (задача Б, п.4.7; ослаблено 2026-07-26 —
+  // тестер ВК увидел ролик 4 раза за 6 уровней на гейте «2-й/60с», это
+  // раздражает): каждый 3-й уровень И не чаще раза в 120 сек — оба условия
+  // обязательны. Гейт живёт в памяти сессии (не в сейве) — на новый запуск
+  // игры счётчик сбрасывается.
+  var AD_LEVEL_GATE = 3;
+  var AD_MIN_INTERVAL_MS = 120000;
   var levelsSinceAd = 0;
   var lastAdShownAt = 0;
+
+  // Сейв пишется ОБЪЕКТОМ ЦЕЛИКОМ (стандарт студии) — единая точка сборки,
+  // чтобы owned/theme не потерялись, если забыть их в одном из мест записи.
+  function buildSaveState(levelOverride) {
+    var lvl = levelOverride != null ? levelOverride : currentIndex;
+    return { level: lvl, max: maxUnlocked, records: records, owned: owned, theme: activeTheme };
+  }
+
+  // Применяет тему целиком (persisted) или временно (preview, persist=false).
+  function applyTheme(name, persist) {
+    if (name && name !== 'default') {
+      document.documentElement.setAttribute('data-theme', name);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    if (persist) activeTheme = name;
+  }
+
+  function updateStoreButtonVisibility() {
+    if (!btnStore) return;
+    btnStore.hidden = !(Platform.canPurchase() && maxUnlocked >= STORE_UNLOCK_AFTER_LEVELS);
+  }
+
+  function renderStore() {
+    var isOwned = owned.indexOf('mint') !== -1;
+    var isActive = activeTheme === 'mint';
+    if (storeBuyMint) {
+      storeBuyMint.disabled = isOwned && isActive;
+      storeBuyMint.textContent = !isOwned ? I18N.t('buy') : I18N.t(isActive ? 'active' : 'activate');
+    }
+    if (storeStatusMint) { storeStatusMint.hidden = true; storeStatusMint.classList.remove('is-error'); }
+  }
 
   function showScreen(el) {
     var screens = document.querySelectorAll('.screen');
@@ -119,10 +168,11 @@
 
     // Сохраняем прогресс (текущий уровень). Переживает обновление страницы (п.1.9).
     maxUnlocked = Math.max(maxUnlocked, index);
-    Platform.save({ level: index, max: maxUnlocked, records: records });
+    Platform.save(buildSaveState(index));
     // Держим «Продолжить» в актуальном состоянии в течение сессии.
     savedIndex = index;
     if (index > 0) setMenuProgress(true);
+    updateStoreButtonVisibility();
 
     // Счёт и подсказки: сбрасываются при каждом открытии уровня.
     levelScore = 0;
@@ -167,7 +217,7 @@
         records.total = tot;
         // Разблокировать следующий уровень и сохранить.
         maxUnlocked = Math.min(Levels.count() - 1, Math.max(maxUnlocked, currentIndex + 1));
-        Platform.save({ level: currentIndex, max: maxUnlocked, records: records });
+        Platform.save(buildSaveState());
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
         setTimeout(function () {
@@ -302,6 +352,13 @@
         if (data && data.records && typeof data.records.levels === 'object') {
           records = { levels: data.records.levels, total: data.records.total || 0 };
         }
+        // Миграция (задача 1, ИНАП): первое изменение структуры сейва за
+        // спринт. Старый сейв (без owned/theme) должен подставить дефолты,
+        // а не упасть — owned: [], theme: 'default'.
+        owned = (data && Array.isArray(data.owned)) ? data.owned : [];
+        activeTheme = (data && typeof data.theme === 'string') ? data.theme : 'default';
+        applyTheme(activeTheme, true);
+        updateStoreButtonVisibility();
       });
     });
   }
@@ -335,6 +392,67 @@
     showScreen(elMenu);
   });
 
+  // --- Магазин косметики (задача 1, ИНАП «Мятная бумага») ---
+
+  if (btnStore) btnStore.addEventListener('click', function () {
+    Sound.resumeContext();
+    previewingMint = false;
+    applyTheme(activeTheme, false); // на входе — актуальная тема, без превью
+    renderStore();
+    showScreen(elStore);
+  });
+
+  if (btnStoreBack) btnStoreBack.addEventListener('click', function () {
+    previewingMint = false;
+    applyTheme(activeTheme, false); // сброс превью, если не докупили
+    showScreen(elMenu);
+  });
+
+  // Превью ДО покупки (п. ТЗ «Превью цветов ДО покупки»): временно
+  // подсвечивает палитру, ничего не сохраняет и не покупает.
+  if (storePreviewMint) storePreviewMint.addEventListener('click', function () {
+    previewingMint = !previewingMint;
+    applyTheme(previewingMint ? 'mint' : activeTheme, false);
+  });
+
+  if (storeBuyMint) storeBuyMint.addEventListener('click', function () {
+    var isOwned = owned.indexOf('mint') !== -1;
+    if (isOwned) {
+      // Уже куплено — кнопка здесь просто переключает активную тему,
+      // без обращения к серверу.
+      previewingMint = false;
+      activeTheme = 'mint';
+      applyTheme('mint', true);
+      Platform.save(buildSaveState());
+      renderStore();
+      return;
+    }
+
+    storeBuyMint.disabled = true;
+    storeBuyMint.textContent = I18N.t('buying');
+    if (storeStatusMint) storeStatusMint.hidden = true;
+
+    Platform.purchase(MINT_ITEM_ID).then(function (res) {
+      if (res && res.success) {
+        if (owned.indexOf('mint') === -1) owned.push('mint');
+        previewingMint = false;
+        activeTheme = 'mint';
+        applyTheme('mint', true);
+        Platform.save(buildSaveState());
+        renderStore();
+      } else {
+        renderStore();
+        if (storeStatusMint) {
+          storeStatusMint.hidden = false;
+          storeStatusMint.classList.add('is-error');
+          storeStatusMint.textContent = I18N.t(
+            (res && res.error === 'server_unreachable') ? 'storeErrorServer' : 'storeErrorGeneric'
+          );
+        }
+      }
+    });
+  });
+
   btnNext.addEventListener('click', function () {
     elWin.hidden = true;
     var next = currentIndex + 1;
@@ -345,15 +463,15 @@
       } else {
         // Все уровни пройдены: сбрасываем прогресс и возвращаем в меню.
         savedIndex = null;
-        Platform.save({ level: 0, max: maxUnlocked, records: records });
+        Platform.save(buildSaveState(0));
         setMenuProgress(false);
         Board.clear();
         showScreen(elMenu);
       }
     }
 
-    // Гейт частоты (задача Б, п.4.7): каждый 2-й уровень И не чаще раза
-    // в 60 сек — оба условия обязательны. Раньше показ был безусловным
+    // Гейт частоты (задача Б, п.4.7): каждый 3-й уровень И не чаще раза
+    // в 120 сек — оба условия обязательны. Раньше показ был безусловным
     // на каждый переход (SDK сам якобы соблюдает интервал) — за 41 запуск
     // на ВК это дало 0 показов рекламы; гейт даёт предсказуемые точки показа.
     levelsSinceAd++;
