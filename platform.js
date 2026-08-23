@@ -301,6 +301,31 @@ window.Platform = (() => {
       });
   }
 
+  /* ---------- Единая точка времени (ЭТАП 3, п.1) ----------
+     ВЕСЬ тракт удержания (энергия, серия входов) читает время ТОЛЬКО
+     отсюда — ни main.js, ни retention.js не зовут Date.now() сами.
+     Иначе сценарии времени («энергия капает, пока игра закрыта»,
+     «игрок отвёл часы назад») невозможно проверить, не переводя часы
+     рабочей машины — а это рвёт git/TLS и всё остальное на ней.
+
+     ПОДМЕНА ДОСТУПНА ТОЛЬКО В DEV/ФОЛБЭК-РЕЖИМЕ (мост ВК не инициализировался):
+     на живой площадке window.__devNowMs игнорируется, даже если кто-то
+     его выставит — время игрока подменить нельзя ни случайно, ни
+     намеренно. Предупреждение печатается один раз, чтобы подменённое
+     время нельзя было принять за настоящее при чтении лога. */
+  let _devTimeWarned = false;
+  function now() {
+    if (!ready && typeof window !== 'undefined' && typeof window.__devNowMs === 'number') {
+      if (!_devTimeWarned) {
+        console.warn('[platform] dev: Platform.now() подменено window.__devNowMs =',
+          new Date(window.__devNowMs).toISOString());
+        _devTimeWarned = true;
+      }
+      return window.__devNowMs;
+    }
+    return Date.now();
+  }
+
   /* ---------- Стики-баннер (задача Б) ----------
      Гарантированная рекламная поверхность: не зависит от гейта
      interstitial/rewarded в main.js и не требует показа по клику.
@@ -352,6 +377,7 @@ window.Platform = (() => {
     init, gameReady, getLang, isAvailable, isRewardedAvailable,
     save, load,
     showInterstitial, showRewarded, showBanner,
+    now,
     canPurchase, purchase,
     gameplayStart, gameplayStop,
     SAVE_SIZE_GUARD_BYTES, AD_HANG_TIMEOUT_MS,

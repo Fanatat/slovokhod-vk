@@ -35,6 +35,16 @@
   var btnLevelsBack = document.getElementById('btn-levels-back');
   var lvTotal = document.getElementById('lv-total');
   var buildBadge = document.getElementById('build-badge');
+  // ЭТАП 3 — модуль удержания
+  var elWall = document.getElementById('energy-wall');
+  var wallTitle = document.getElementById('wall-title');
+  var wallText = document.getElementById('wall-text');
+  var wallSub = document.getElementById('wall-sub');
+  var btnWallBack = document.getElementById('btn-wall-back');
+  var btnWallMenu = document.getElementById('btn-wall-menu');
+  var streakLine = document.getElementById('streak-line');
+  var retentionToast = document.getElementById('retention-toast');
+  var hintBadge = document.getElementById('hint-bonus-badge');
 
   // Плашка номера билда (стандарт с 2026-07-25): текст ставим сразу, не
   // дожидаясь Platform.init() — это статическая метка сборки, не данные
@@ -51,6 +61,54 @@
   var hintsUsed = 0;     // подсказки взяты в текущем уровне
   var tutorialShown = false; // туториал: показываем один раз за сессию
   var hintWord = null;   // текущее целевое слово для revealHint (= chain[chainPos])
+
+  /* ============================================================
+     МОДУЛЬ УДЕРЖАНИЯ (ЭТАП 3). Система КОПИРУЕТСЯ из Color Sort, не
+     изобретается: retention.js взят побайтовой копией, здесь — только
+     конфиг и точки применения. Числа — решение основателя (Р-СЛ10),
+     менять их без нового решения нельзя.
+
+     ДВЕ ШКАЛЫ НЕ СМЕШИВАЮТСЯ (шрам ТЗ №15 Color Sort):
+       ЗАПАС (энергия) — тратится на ВПЕРВЫЕ пройденный уровень;
+       ПОДСКАЗКИ — отдельный баланс, в него идут награды серии входов.
+     Между ними нет ни обмена, ни конвертации, ни общего счётчика: ни
+     одна функция ниже не читает обе величины сразу.
+     ============================================================ */
+  var RETENTION_CONFIG = (typeof Retention !== 'undefined') ? Retention.mergeConfig({
+    // gateMode:'energy' — накопитель НИЧЕГО не открывает, это отдельная
+    // тратимая валюта (уровни в сетке по-прежнему открывает только
+    // прогресс, maxUnlocked). Числа ТЗ: потолок 15, +10 за такт 6 часов.
+    gateMode:       'energy',
+    tickMs:         6 * 60 * 60 * 1000,
+    dripPerTick:    10,
+    accumulatorCap: 15,
+    streakThreshold: 3,
+    // Обе награды серии идут в ПОДСКАЗКИ (в Color Sort 3-й день дарил
+    // косметику — в Словоходе витрины нет вовсе, дарить нечего).
+    streakDayReward:  { 2: 'hints', 3: 'hints' },
+    // Своё поле конфига: модуль возвращает ТИП награды, количество —
+    // забота игры (mergeConfig прокидывает незнакомые ключи как есть,
+    // правки модуля для этого не потребовалось).
+    streakHintsByDay: { 2: 2, 3: 5 },
+    callbacks: {
+      totalLevels:     function ()  { return Levels.count(); },
+      // «Пройден» в Словоходе = индекс меньше maxUnlocked: завершение
+      // уровня двигает maxUnlocked на currentIndex+1. По рекордам
+      // определять нельзя — запись рекорда условная (records.levels[i]
+      // не появляется, если счёт не побил прошлый), и уровень, пройденный
+      // с нулевым счётом, выглядел бы непройденным.
+      isCompleted:     function (i) { return i < maxUnlocked; },
+      maxReachedIndex: function ()  { return maxUnlocked; },
+      grantHints:      function (n, day) { grantBonusHints(n, day); },
+      // Косметики в Словоходе нет — награда 'style' не используется.
+      grantStyle:      function ()  {},
+    },
+  }) : null;
+
+  var retentionState = null;   // состояние модуля (энергия + серия)
+  var bonusHints = 0;          // ВТОРАЯ шкала: бесплатные подсказки
+  var pendingOpenIndex = null; // куда шёл игрок, когда упёрся в стену
+  var retentionTimer = null;
 
   // Гейт частоты interstitial (задача Б, п.4.7): каждый N-й уровень И не
   // чаще раза в T мс — оба условия обязательны. Гейт живёт в памяти
@@ -110,6 +168,15 @@
   }
 
   function persist(fullState) {
+    /* ЭТАП 3, п.3 (миграция): поля модуля удержания дописываются ЗДЕСЬ,
+       в единственной точке записи. Любой существующий вызов persist()
+       (их шесть) иначе записал бы объект БЕЗ них — и молча стёр бы
+       игроку запас и серию, потому что объект пишется целиком (п.2.3).
+       Ключи короткие (r/bh): сейв меряется байтами, см. сторож ниже. */
+    if (retentionState && typeof Retention !== 'undefined') {
+      fullState.r = Retention.encodeState(retentionState);
+      fullState.bh = bonusHints;
+    }
     if (Platform && typeof Platform.SAVE_SIZE_GUARD_BYTES === 'number') {
       var bytes = saveByteSize(fullState);
       if (bytes > Platform.SAVE_SIZE_GUARD_BYTES) {
@@ -121,6 +188,279 @@
       }
     }
     Platform.save(fullState);
+  }
+
+  /* ============================================================
+     ЗАПАС, СЕРИЯ, СТЕНА — точки применения модуля.
+     ВСЁ время читается через Platform.now() (единая точка, ЭТАП 3 п.1):
+     ни одна функция ниже не зовёт Date.now() сама, иначе сценарии
+     времени нельзя проверить, не переводя часы рабочей машины.
+     Любое правило, которое МОЛЧА меняет видимое поведение (не начислили,
+     не списали, не выдали), пишет причину в консоль (п.5): через сутки
+     собственное правило неотличимо от бага.
+     ============================================================ */
+
+  function energyLeft() {
+    if (!retentionState || typeof Retention === 'undefined') return 0;
+    return Retention.dripBacklogCount(retentionState, RETENTION_CONFIG);
+  }
+
+  // Сейв прогресса «как есть» — для записей, которые инициирует модуль
+  // (такт, серия, трата подсказки), когда уровень не открывался.
+  function persistProgress() {
+    persist({ level: (savedIndex != null ? savedIndex : 0), max: maxUnlocked, records: records });
+  }
+
+  function formatClock(ms) {
+    var d = new Date(ms);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+
+  /* Остаток до следующего такта словами («через 5 ч 12 мин»). Нужен
+     вариантам копирайта, которые обещают срок, а не время на часах:
+     на часах понятнее «когда», в обратном отсчёте — «сколько ждать».
+     Строка обновляется каждым тактом таймера (см. retentionTick), то
+     есть отстаёт максимум на полминуты. */
+  function formatLeft(nextAtMs) {
+    var ms = Math.max(0, nextAtMs - Platform.now());
+    var totalMin = Math.ceil(ms / 60000);
+    var h = Math.floor(totalMin / 60);
+    var m = totalMin % 60;
+    if (h > 0 && m > 0) return h + ' ч ' + m + ' мин';
+    if (h > 0) return h + ' ч';
+    return Math.max(1, m) + ' мин';
+  }
+
+  var LV_FORMS = ['новый уровень', 'новых уровня', 'новых уровней'];
+  var HINT_FORMS = ['подсказка', 'подсказки', 'подсказок'];
+  var DAY_FORMS = ['день', 'дня', 'дней'];
+
+  /* Индикатор запаса: ОДНА функция обновляет ВСЕ инстансы разом (меню,
+     игровой экран, стена) по классам, а не по id — новое место в UI
+     добавляется разметкой, без правки этой функции.
+     Строка разведена ПО СОСТОЯНИЯМ: полный запас / есть / пусто. */
+  function renderEnergy() {
+    if (!retentionState || typeof Retention === 'undefined') return;
+    var cur = energyLeft();
+    var cap = RETENTION_CONFIG.accumulatorCap;
+    var gain = RETENTION_CONFIG.dripPerTick;
+    var nextAt = Retention.nextUnlockAtMs(retentionState, RETENTION_CONFIG);
+    setAllText('.energy-now', String(cur));
+    setAllText('.energy-cap', String(cap));
+
+    var vars = {
+      n: cur, cap: cap, gain: gain, lv: I18N.plural(cur, LV_FORMS),
+      time: nextAt == null ? '' : formatClock(nextAt),
+      left: nextAt == null ? '' : formatLeft(nextAt),
+    };
+    var line;
+    if (cur >= cap) line = I18N.fill('energyLineFull', vars);
+    else if (cur > 0) line = I18N.fill('energyLineHave', vars);
+    else line = I18N.fill('energyLineEmpty', vars);
+    setAllText('.energy-line', line);
+  }
+
+  function setAllText(selector, text) {
+    var nodes = document.querySelectorAll(selector);
+    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
+  }
+
+  function renderStreakLine() {
+    if (!streakLine || !retentionState) return;
+    var shown = Math.min(retentionState.streakLen, RETENTION_CONFIG.streakThreshold);
+    streakLine.textContent = I18N.fill('streakLine', {
+      n: shown, d: I18N.plural(shown, DAY_FORMS),
+    });
+  }
+
+  // Бейдж бесплатных подсказок — ВТОРАЯ шкала, к запасу отношения не
+  // имеет. Скрыт при нуле, число без знаменателя при значении > 0.
+  function renderHintBadge() {
+    if (!hintBadge) return;
+    hintBadge.hidden = !(bonusHints > 0);
+    hintBadge.textContent = bonusHints > 0 ? String(bonusHints) : '';
+  }
+
+  var toastTimer = null;
+  function showRetentionToast(text) {
+    if (!retentionToast) return;
+    retentionToast.textContent = text;
+    retentionToast.hidden = false;
+    // Перезапуск анимации: класс снимается и ставится в следующем кадре.
+    retentionToast.classList.remove('is-visible');
+    void retentionToast.offsetWidth;
+    retentionToast.classList.add('is-visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      retentionToast.classList.remove('is-visible');
+      toastTimer = setTimeout(function () { retentionToast.hidden = true; }, 400);
+    }, 2800);
+  }
+
+  function grantBonusHints(n, day) {
+    bonusHints += n;
+    console.log('[retention] серия ' + day + '-й день подряд: +' + n + ' к подсказкам, стало ' + bonusHints);
+    persistProgress();   // награда обязана пережить закрытие вкладки сразу после входа
+    renderHintBadge();
+    updateHintLabel();
+    showRetentionToast(I18N.fill('streakToastHints', {
+      n: n, hint: I18N.plural(n, HINT_FORMS), day: day,
+    }));
+  }
+
+  /* Такт раздатчика. Вызывается по таймеру и в точках возврата в меню.
+     ВАЖНО: сохраняем при ЛЮБОМ изменении состояния, а не только при
+     начислении — applyDripTick подтягивает штамп ещё в двух случаях
+     (часы игрока ушли назад; запас упёрся в потолок), и без записи эта
+     подтяжка терялась бы при перезагрузке, то есть фикс времени
+     существовал бы только в памяти сессии. */
+  function retentionTick() {
+    if (!retentionState || typeof Retention === 'undefined') return;
+    var prev = retentionState;
+    var before = prev.dripOpened;
+    var nowMs = Platform.now();
+    var rolledBack = nowMs < prev.lastTickAt;
+    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    // Перерисовываем ВСЕГДА: строка может нести обратный отсчёт, и он
+    // обязан идти, даже когда состояние модуля не менялось. Запись в
+    // сейв — только при реальном изменении, рендер записи не требует.
+    renderEnergy();
+    if (retentionState === prev) return;
+
+    var granted = retentionState.dripOpened - before;
+    persistProgress();
+    if (granted > 0) {
+      console.log('[retention] такт: +' + granted + ', запас ' + retentionState.dripOpened +
+        ' из ' + RETENTION_CONFIG.accumulatorCap);
+      showRetentionToast(I18N.fill('energyToastGain', { n: granted }));
+      continuePendingIfPossible();
+    } else if (rolledBack) {
+      console.log('[retention] часы устройства ушли НАЗАД: начисления нет, штамп подтянут к «сейчас» — ' +
+        'иначе следующий такт наступил бы только когда реальное время догонит старый штамп');
+    } else {
+      console.log('[retention] запас на потолке: начисления нет, штамп подтянут к «сейчас» — ' +
+        'простой не банкуется в тени');
+    }
+  }
+
+  /* ---------- Стена (п.4) ----------
+     Показывается ВМЕСТО старта нового, ещё не пройденного уровня, когда
+     запас на нуле. requestOpenLevel — ЕДИНСТВЕННАЯ дверь во все пути
+     входа: «Играть», «Продолжить», тайл сетки, «Дальше» после победы.
+     Рестарт текущего уровня зовёт openLevel НАПРЯМУЮ и стену не
+     показывает: игрок уже внутри этого уровня, а списание происходит на
+     завершении, не на старте — второй раз платить не за что (п.1). */
+  function canOpenLevel(index) {
+    if (!retentionState || typeof Retention === 'undefined') return true; // модуль не загрузился — игру не запираем
+    if (index < maxUnlocked) return true;                                 // уже пройден — повтор бесплатен
+    return energyLeft() > 0;
+  }
+
+  function requestOpenLevel(index) {
+    if (canOpenLevel(index)) { openLevel(index); return; }
+    pendingOpenIndex = index;
+    console.log('[retention] стена: запас 0, уровень ' + (index + 1) +
+      ' ещё не пройден — старт отложен до пополнения');
+    showWall();
+  }
+
+  function showWall() {
+    renderEnergy();
+    var nextAt = Retention.nextUnlockAtMs(retentionState, RETENTION_CONFIG);
+    var gain = RETENTION_CONFIG.dripPerTick;
+    var timeStr = nextAt == null ? '' : formatClock(nextAt);
+    var wallVars = {
+      time: timeStr, gain: gain, cap: RETENTION_CONFIG.accumulatorCap,
+      lvGain: I18N.plural(gain, LV_FORMS),
+      left: nextAt == null ? '' : formatLeft(nextAt),
+    };
+    if (wallTitle) wallTitle.textContent = I18N.fill('energyWallTitle', wallVars);
+    if (wallText) wallText.textContent = I18N.fill('energyWallText', wallVars);
+    if (wallSub) wallSub.textContent = I18N.t('energyWallSub');
+    if (btnWallMenu) btnWallMenu.textContent = I18N.t('energyWallBack');
+    showScreen(elWall);
+  }
+
+  // Запас появился, пока игрок стоял у стены — продолжаем ровно туда,
+  // куда он шёл, без лишнего клика.
+  function continuePendingIfPossible() {
+    if (pendingOpenIndex == null) return;
+    if (!elWall || !elWall.classList.contains('is-active')) return;
+    if (energyLeft() <= 0) return;
+    var idx = pendingOpenIndex;
+    pendingOpenIndex = null;
+    console.log('[retention] запас пополнен у стены — продолжаем на уровень ' + (idx + 1));
+    openLevel(idx);
+  }
+
+  /* ---------- Инициализация и МИГРАЦИЯ (п.3) ----------
+     Один путь для новичка и для старого сейва: у обоих поля модуля
+     отсутствуют, значит initState() при gateMode:'energy' выдаёт ПОЛНЫЙ
+     запас. Это осознанная щедрость, а не подарок по недосмотру: у игры
+     1126 установок, и старый игрок, открывший знакомую игру и упёршийся
+     в стену на первом же уровне, удалит её — это худший первый контакт
+     с модулем, какой можно устроить. Прогресс и рекорды при этом не
+     трогаются вообще. */
+  function bootRetention(data) {
+    if (typeof Retention === 'undefined' || !RETENTION_CONFIG) {
+      console.warn('[retention] модуль не загружен — игра работает без запаса и серии');
+      return;
+    }
+    var nowMs = Platform.now();
+    var hasModuleFields = !!(data && Retention.isValidEncoded(data.r));
+    if (hasModuleFields) {
+      retentionState = Retention.decodeState(data.r);
+    } else {
+      retentionState = Retention.initState(maxUnlocked > 0 ? maxUnlocked : -1, nowMs, RETENTION_CONFIG);
+      console.log('[retention] МИГРАЦИЯ: полей модуля в сейве нет' +
+        (data ? ' (старый сейв, прогресс уровень ' + ((data.level || 0) + 1) + ')' : ' (новый игрок)') +
+        ' → запас полный ' + RETENTION_CONFIG.accumulatorCap + ', прогресс и рекорды не тронуты');
+    }
+    bonusHints = (data && typeof data.bh === 'number' && data.bh > 0) ? Math.floor(data.bh) : 0;
+
+    // Такт за время, пока игра была закрыта.
+    var prev = retentionState;
+    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    var granted = retentionState.dripOpened - prev.dripOpened;
+    if (granted > 0) {
+      console.log('[retention] за время без игры набежало +' + granted +
+        ', запас ' + retentionState.dripOpened + ' из ' + RETENTION_CONFIG.accumulatorCap);
+    }
+
+    // День серии засчитывается ФАКТОМ входа, не прохождением уровня.
+    // День берём из Platform.now() — той же единой точки времени, что и
+    // такт (в эталоне серия читала часы отдельно; здесь ТЗ требует одну
+    // точку, иначе живая приёмка серии подменой даты невозможна).
+    var entry = Retention.onEnter(retentionState, Retention.dayKeyFromDate(new Date(nowMs)), RETENTION_CONFIG);
+    var streakChanged = entry.state !== retentionState;
+    retentionState = entry.state;
+    if (entry.reward === 'hints') {
+      var day = retentionState.streakLen;
+      var amount = RETENTION_CONFIG.streakHintsByDay[day] || 0;
+      if (amount > 0) RETENTION_CONFIG.callbacks.grantHints(amount, day);
+      else console.log('[retention] день серии ' + day + ' помечен наградой, но количество не задано — не выдано');
+    } else if (!streakChanged) {
+      console.log('[retention] сегодня уже входили: серия ' + retentionState.streakLen +
+        ' дн., награда повторно НЕ выдаётся');
+    } else {
+      console.log('[retention] вход засчитан: серия ' + retentionState.streakLen +
+        ' дн., награды на этот день нет');
+    }
+    if (granted > 0 || streakChanged || !hasModuleFields) persistProgress();
+
+    renderEnergy();
+    renderStreakLine();
+    renderHintBadge();
+    updateHintLabel();
+    /* Фоновый такт. typeof-гейт — не перестраховка: в песочнице тестов
+       (vm-контекст без setInterval) вызов уронил бы весь старт игры, а
+       сам такт там не нужен — тесты гоняют retentionTick реальными
+       путями (возврат в меню). Период 30 с: такт раздатчика шестичасовой,
+       чаще незачем, а стена должна отпустить игрока без перезахода. */
+    if (typeof setInterval === 'function') {
+      if (retentionTimer && typeof clearInterval === 'function') clearInterval(retentionTimer);
+      retentionTimer = setInterval(retentionTick, 30000);
+    }
   }
 
   function showScreen(el) {
@@ -141,6 +481,9 @@
   // доступна (задача А, п.180) — кнопка сама всегда видна, см. start().
   function updateHintLabel() {
     if (!btnHint) return;
+    // ЭТАП 3: пока есть бесплатные подсказки из серии входов, кнопка НЕ
+    // обещает ролик — она его и не покажет (баланс тратится первым).
+    if (bonusHints > 0) { btnHint.textContent = I18N.t('hintBonusHint'); return; }
     btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
   }
 
@@ -190,6 +533,11 @@
     // Счёт и подсказки: сбрасываются при каждом открытии уровня.
     levelScore = 0;
     hintsUsed = 0;
+    // Видимый слой модуля: запас и бейдж подсказок обязаны быть верны на
+    // игровом экране сразу, а не после первого события.
+    renderEnergy();
+    renderHintBadge();
+    updateHintLabel();
     // Указатель цепочки: сбрасывается при каждом открытии уровня.
     var chainPos = 0;
     hintWord = (level.chain && level.chain.length) ? level.chain[0] : null;
@@ -220,6 +568,24 @@
         }
       },
       onComplete: function () {
+        /* ЭТАП 3, п.1: списание строго одно — новый, ЕЩЁ НЕ пройденный
+           уровень завершён. Флаг снимается ДО обновления maxUnlocked
+           ниже, иначе к моменту проверки уровень уже выглядел бы
+           пройденным всегда. Рестарт и повтор пройденного сюда попадают
+           с wasCompleted=true и запас не трогают. */
+        var wasCompleted = currentIndex < maxUnlocked;
+        if (retentionState && typeof Retention !== 'undefined') {
+          if (!wasCompleted) {
+            var beforeSpend = retentionState.dripOpened;
+            retentionState = Retention.spendEnergy(retentionState, RETENTION_CONFIG);
+            console.log('[retention] уровень ' + (currentIndex + 1) + ' пройден ВПЕРВЫЕ: запас ' +
+              beforeSpend + ' → ' + retentionState.dripOpened);
+            renderEnergy();   // расход виден сразу, а не молча
+          } else {
+            console.log('[retention] уровень ' + (currentIndex + 1) +
+              ' пройден повторно — запас не тронут (' + energyLeft() + ')');
+          }
+        }
         // Подсчёт очков за уровень.
         var finalScore = Math.max(0, levelScore + (hintsUsed === 0 ? 50 : 0) - hintsUsed * 25);
         var best = records.levels[index] || 0;
@@ -229,7 +595,14 @@
         for (var rk in records.levels) { if (records.levels.hasOwnProperty(rk)) tot += records.levels[rk]; }
         records.total = tot;
         // Разблокировать следующий уровень и сохранить.
-        maxUnlocked = Math.min(Levels.count() - 1, Math.max(maxUnlocked, currentIndex + 1));
+        /* ЭТАП 3: потолок Math.min(count-1, …) снят. Он делал ПОСЛЕДНИЙ
+           уровень вечно «непройденным» (maxUnlocked упирался в его же
+           индекс), а на этом предикате теперь держится правило «повтор
+           пройденного бесплатен» — игрок платил бы запасом за каждое
+           перепрохождение финального уровня и мог упереться в стену на
+           уже пройденном. Для сетки уровней разницы нет: она сравнивает
+           i > maxUnlocked, и значение count лишь означает «открыто всё». */
+        maxUnlocked = Math.max(maxUnlocked, currentIndex + 1);
         persist({ level: currentIndex, max: maxUnlocked, records: records });
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
@@ -320,7 +693,7 @@
         tile.textContent = i + 1;
         if (i === savedIndex) tile.classList.add('current');
         (function (idx) {
-          tile.addEventListener('click', function () { openLevel(idx); });
+          tile.addEventListener('click', function () { requestOpenLevel(idx); });
         })(i);
       }
       levelsGrid.appendChild(tile);
@@ -365,6 +738,9 @@
         if (data && data.records && typeof data.records.levels === 'object') {
           records = { levels: data.records.levels, total: data.records.total || 0 };
         }
+        // Модуль удержания поднимаем ПОСЛЕ прогресса: миграция читает
+        // maxUnlocked, а строки видимого слоя — уже готовые рекорды.
+        bootRetention(data);
       });
     });
   }
@@ -376,15 +752,34 @@
   // «Выбор уровня» (клик по 1-му уровню).
   btnPlay.addEventListener('click', function () {
     Sound.resumeContext();   // разрешаем звук по действию пользователя
-    openLevel(0);
+    requestOpenLevel(0);
   });
+
+  // Единая точка возврата в меню: подбирает такты, набежавшие пока
+  // игрок был на другом экране, и обновляет обе строки модуля.
+  function goToMenu() {
+    retentionTick();
+    renderEnergy();
+    renderStreakLine();
+    showScreen(elMenu);
+  }
 
   btnBack.addEventListener('click', function () {
     Board.clear();
-    showScreen(elMenu);
+    goToMenu();
   });
 
+  function leaveWall() {
+    // Ушли со стены сами — отложенное намерение не должно сработать позже.
+    pendingOpenIndex = null;
+    goToMenu();
+  }
+  if (btnWallBack) btnWallBack.addEventListener('click', leaveWall);
+  if (btnWallMenu) btnWallMenu.addEventListener('click', leaveWall);
+
   if (btnRestartLevel) btnRestartLevel.addEventListener('click', function () {
+    // Намеренно МИМО requestOpenLevel: рестарт текущего уровня бесплатен
+    // (ЭТАП 3, п.1), игрок уже внутри него, а списание идёт за завершение.
     openLevel(currentIndex);
   });
 
@@ -404,7 +799,7 @@
 
     function proceed() {
       if (Levels.get(next)) {
-        openLevel(next);
+        requestOpenLevel(next);
       } else {
         // Все уровни пройдены: сбрасываем прогресс и возвращаем в меню.
         savedIndex = null;
@@ -469,6 +864,21 @@
   // задача А), ролик не пытаемся показывать вовсе: кнопка это не обещает.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
+    /* ЭТАП 3: бесплатные подсказки из серии входов тратятся ПЕРВЫМИ —
+       реклама не запрашивается, пока баланс не пуст. Это ВТОРАЯ шкала:
+       к запасу энергии она не имеет отношения и его не читает.
+       hintsUsed++ остаётся — это правило СЧЁТА за уровень, а не траты
+       ресурса: бесплатная подсказка так же влияет на очки, как платная. */
+    if (bonusHints > 0) {
+      bonusHints--;
+      hintsUsed++;
+      console.log('[retention] подсказка из баланса серии, осталось ' + bonusHints + ' — ролик не запрашивался');
+      persistProgress();
+      renderHintBadge();
+      updateHintLabel();
+      Board.revealHint(hintWord);
+      return;
+    }
     if (!Platform.isRewardedAvailable()) {
       hintsUsed++;
       Board.revealHint(hintWord);
@@ -488,7 +898,7 @@
 
   btnContinue.addEventListener('click', function () {
     Sound.resumeContext();
-    if (savedIndex != null) openLevel(savedIndex);
+    if (savedIndex != null) requestOpenLevel(savedIndex);
   });
 
   function renderSound() {
