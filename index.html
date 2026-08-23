@@ -6,7 +6,20 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Словоход</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+
+  <!-- КЕШ-БАСТИНГ (ЭТАП 2, п.3.1). Каждый рантайм-тег ниже (этот <link>
+       и все <script> в конце body) несёт ПЛЕЙСХОЛДЕР версии, который
+       build.py заменяет номером билда автоштамповкой — см.
+       build.py:stamp_cache_bust и список VERSIONED_ASSETS. Сборка
+       ПАДАЕТ, если хоть один файл не проштамповался ровно один раз,
+       и если плейсхолдер где-то остался непроштампованным.
+       Руками версии больше не проставляются: до этапа 2 board.js и
+       sound.js не имели версии вовсе — браузер игрока отдал бы их из
+       кэша после обновления игровой логики, и часть игроков получила
+       бы полусобранную версию (шрам ТЗ №19 Color Sort).
+       Вне билда плейсхолдер остаётся как есть — это нормально, значит
+       билд не собирался через build.py. -->
+  <link rel="stylesheet" href="style.css?v=14" />
 
   <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
        Вне билда (локальная разработка) маркер НЕ заменяется:
@@ -16,7 +29,7 @@
   <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
        window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
        заменяется: main.js покажет плашку "dev" вместо номера. -->
-  <script>window.BUILD = 'vk-b8-f364b02-20260726';</script>
+  <script>window.BUILD = 'vk-b14-ebcd7f9-20260823';</script>
 </head>
 <body>
   <div id="app">
@@ -37,7 +50,6 @@
         <button id="btn-continue" class="btn btn-primary" hidden data-i18n="continue">Продолжить</button>
         <button id="btn-play" class="btn btn-primary" data-i18n="play">Играть</button>
         <button id="btn-levels" class="btn btn-secondary" data-i18n="levels">Уровни</button>
-        <button id="btn-store" class="btn btn-secondary" hidden data-i18n="store">Магазин</button>
       </nav>
 
       <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
@@ -53,25 +65,6 @@
         <span id="lv-total" class="lv-total"></span>
       </header>
       <div id="levels-grid" class="levels-grid"></div>
-    </section>
-
-    <!-- Экран 3б: магазин косметики (задача 1, ИНАП «Мятная бумага»).
-         Разблокируется после N пройденных уровней — см. main.js. Только на
-         площадках, где Platform.canPurchase() = true (сейчас — ВК). -->
-    <section id="store" class="screen">
-      <header class="lv-head">
-        <button id="btn-store-back" class="icon-btn" aria-label="Назад">‹</button>
-        <span class="lv-title" data-i18n="store">Магазин</span>
-      </header>
-      <div class="store-item">
-        <button id="store-preview-mint" class="store-swatch" aria-label="Превью: Мятная бумага">
-          <span class="swatch-dot" style="background:#e9f1e6"></span>
-          <span class="swatch-dot" style="background:#3f8f5f"></span>
-        </button>
-        <p class="store-item-name" data-i18n="themeMint">Мятная бумага</p>
-        <button id="store-buy-mint" class="btn btn-primary" data-i18n="buy">Купить</button>
-        <p id="store-status-mint" class="store-status" hidden></p>
-      </div>
     </section>
 
     <!-- Экран 4: игра -->
@@ -130,12 +123,11 @@
        текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
   <div id="build-badge" aria-hidden="true"></div>
 
-  <script src="i18n.js?v=6"></script>
-  <script src="config.js"></script>
-  <script src="platform.js?v=2"></script>
-  <script src="levels.js?v=6"></script>
-  <script src="board.js"></script>
-  <script src="sound.js"></script>
-  <script src="main.js?v=6"></script>
+  <script src="i18n.js?v=14"></script>
+  <script src="platform.js?v=14"></script>
+  <script src="levels.js?v=14"></script>
+  <script src="board.js?v=14"></script>
+  <script src="sound.js?v=14"></script>
+  <script src="main.js?v=14"></script>
 </body>
 </html>

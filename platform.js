@@ -19,9 +19,9 @@
    При провале — dev-режим (isAvailable=false, dev-бейдж, игра без сейва/рекламы).
    Стандарт студии: вечная загрузка запрещена в любом окружении.
 
-   Маппинг контракта v3 (задача Б добавила showBanner; задача 1/2 подключила
-   витрину косметики «Мятная бумага» — canPurchase/purchase теперь реально
-   вызываются из main.js):
+   Маппинг контракта v3 (задача Б добавила showBanner; canPurchase/purchase
+   держим в контракте как задел — в этой сборке (A+B) их никто не вызывает,
+   витрины косметики нет, см. отдельную задачу В):
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
                                  + VKWebAppCheckNativeAds (доступность rewarded)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
@@ -35,19 +35,21 @@
                                  vk-bridge/issues/243), а при false подсказка выдаётся
                                  бесплатно без попытки показать ролик.
                                  dev-режим (!ready) → true (label "за рекламу" для тестирования)
-     save(fullState)           → VKWebAppStorageSet {key, value}
-     load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value
+     save(fullState)           → VKWebAppStorageSet {key, value};
+                                 dev-режим (!ready) → localStorage[slovohod_dev_save_vk]
+     load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value;
+                                 dev-режим (!ready) → localStorage[slovohod_dev_save_vk]
      showInterstitial          → VKWebAppShowNativeAds {ad_format:'interstitial'}
+                                 + watchdog 40000мс, onResume(wasShown)
      showRewarded              → VKWebAppShowNativeAds {ad_format:'reward'}
-                                 result.result === true → досмотрено
+                                 result.result === true → досмотрено, награда;
+                                 result !== true → показан, но не досмотрен → БЕЗ награды;
+                                 reject/таймаут → награда БЕСПЛАТНО (ЭТАП 2, п.1.1)
      showBanner()               → VKWebAppShowBannerAd {banner_location:'top', layout_type:'resize'}.
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
                                  interstitial/rewarded, вызывается один раз при старте.
-     canPurchase()/purchase()   → VKWebAppShowOrderBox {type:'item', item}; клиентский
-                                 статус ('success') сверяется с GAME_CONFIG.vkOrderVerifyUrl
-                                 (сервер получает уведомление ВК и подтверждает списание) —
-                                 без сервера или при его недоступности покупка НЕ считается
-                                 успешной (без ложного success), см. комментарий у purchase().
+     canPurchase()/purchase()   → присутствуют в контракте (см. примечание выше), в этой
+                                 сборке main.js их не вызывает.
      gameplayStart/Stop        → no-op
    Доки/типы VK Bridge проверены по исходникам пакета:
    https://github.com/VKCOM/vk-bridge/blob/master/packages/core/src/types/data.ts
@@ -55,6 +57,45 @@
 window.Platform = (() => {
   const STORAGE_KEY   = 'filword_save';
   const INIT_TIMEOUT  = 2500;   // мс — после этого уходим в dev-режим
+
+  /* ---------- Dev-фолбэк сейва (ЭТАП 2, п.0.2) ----------
+     Стандарт студии 19.07: одинаковый dev-фолбэк во всех играх
+     (нонограммы: adapters/vk_bridge.js DEV_SAVE_KEY
+     'nonogram_dev_save_vk'). Активен ТОЛЬКО когда !ready — при живом
+     VK Bridge localStorage не трогается вообще, сейв идёт через
+     VKWebAppStorageSet. Этого ключа ждёт tools/smoke_vk_dist.js:101,149. */
+  const DEV_SAVE_KEY = 'slovohod_dev_save_vk';
+
+  /* ---------- Бюджет сторожа объёма сейва (ЭТАП 2, п.2.1) ----------
+     3500 байт — ИНЖЕНЕРНЫЙ БЮДЖЕТ СТУДИИ (решение основателя 22.08),
+     первоисточником (документацией ВК) НЕ подтверждён: консервативный
+     запас под реальный лимит VKWebAppStorageSet. То же число в бою в
+     Color Sort (vk_platform.js:119) и нонограммах. Замер живого JSON
+     делает main.js (persist()) перед КАЖДОЙ записью. */
+  const SAVE_SIZE_GUARD_BYTES = 3500;
+
+  /* ---------- Watchdog зависшей рекламы (ЭТАП 2, п.1.2) ----------
+     40000 мс — значение прочитано из эталона Color Sort
+     (vk_platform.js:95 REWARD_AD_TIMEOUT_MS, platform.js:100
+     AD_HANG_TIMEOUT_MS — оба 40000). Ролики ВК обычно 15-30 с, 40 с —
+     запас поверх этого, чтобы не обрубить ЗАКОННО идущий длинный ролик.
+     Здесь vkBridge.send() — Promise, поэтому идемпотентность даёт
+     settle-once (флаг settled в finish()), а не два флага, как в
+     колбэк-API Яндекса. */
+  const AD_HANG_TIMEOUT_MS = 40000;
+
+  /* Промис + таймаут. Не Promise.race с «голым» setTimeout: таймер
+     обязан сниматься при штатном ответе, иначе он держит event loop
+     и в Node-тестах процесс висит лишние 40 секунд. */
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), ms);
+      promise.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        (e) => { clearTimeout(timer); reject(e); },
+      );
+    });
+  }
 
   function hasBridge() {
     return typeof vkBridge !== 'undefined';
@@ -81,25 +122,21 @@ window.Platform = (() => {
       return false;
     }
 
-    const timeoutP = new Promise((_, rej) =>
-      setTimeout(() => rej(new Error('timeout')), INIT_TIMEOUT),
-    );
-
+    // withTimeout вместо Promise.race с «голым» setTimeout: race
+    // оставлял таймер висеть даже при штатном ответе — в Node-тестах
+    // это держало event loop, а в браузере зря удерживало замыкание.
     try {
-      await Promise.race([vkBridge.send('VKWebAppInit'), timeoutP]);
+      await withTimeout(vkBridge.send('VKWebAppInit'), INIT_TIMEOUT);
       ready = true;
       console.log('[platform] VK Bridge init OK');
 
       // Проверяем доступность rewarded-рекламы сразу при init, кешируем результат.
       // https://dev.vk.com/bridge/VKWebAppCheckNativeAds
-      const checkTimeout = new Promise((_, rej) =>
-        setTimeout(() => rej(new Error('timeout')), 1500),
-      );
       try {
-        const check = await Promise.race([
+        const check = await withTimeout(
           vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' }),
-          checkTimeout,
-        ]);
+          1500,
+        );
         rewardedAvailable = check.result === true;
         console.log('[platform] rewarded доступен:', rewardedAvailable);
       } catch (e) {
@@ -144,41 +181,23 @@ window.Platform = (() => {
   }
 
   /* ---------- Сохранение ----------
-     VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK.
-
-     Сторож байтов (реинтродукция задачи 1: раньше был вырезан вместе с
-     запаркованным ИНАП в a73863c — тогда порог был угадан по внешнему
-     issue, без реального замера, и решили не тащить угаданное число на
-     модерацию). Теперь замерено по факту (node, 2026-07-26): худший
-     реалистичный сейв (100/100 уровней пройдены с рекордами + owned +
-     theme) = 980 байт. Документированный лимит VKWebAppStorageSet — 4096
-     байт, но по факту JSON-сериализованные объекты обрезаются на ~2236
-     байт (github.com/VKCOM/vk-bridge/issues/226, подтверждено). Порог
-     ниже взят с запасом ~60% ниже реального сбоя и вдвое выше нашего
-     максимума — расти в этом проекте почти некуда (уровни статичны,
-     records растёт линейно и уже посчитан на все 100). Превышение —
-     сейв целиком пропускается (не пишем усечённый объект, который потом
-     не распарсится при load()). */
-  const SAVE_BYTE_LIMIT = 1600;
-
+     VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK. */
   async function save(fullState) {
     if (!ready) {
-      console.warn('[platform] dev-режим: сейв пропущен');
-      return;
-    }
-    const value = JSON.stringify(fullState);
-    const bytes = new TextEncoder().encode(value).length;
-    if (bytes > SAVE_BYTE_LIMIT) {
-      console.error(
-        '[platform] сейв превышает безопасный лимит VKWebAppStorageSet (' +
-        bytes + ' > ' + SAVE_BYTE_LIMIT + ' байт) — запись ПРОПУЩЕНА целиком', fullState,
-      );
+      // dev-фолбэк: платформы нет — пишем в localStorage, чтобы прогресс
+      // переживал перезагрузку страницы на localhost/dev-URL.
+      try {
+        localStorage.setItem(DEV_SAVE_KEY, JSON.stringify(fullState));
+      } catch (e) {
+        // dev-режим — падать нельзя.
+        console.warn('[platform] dev-сейв не записался:', e);
+      }
       return;
     }
     try {
       await vkBridge.send('VKWebAppStorageSet', {
         key:   STORAGE_KEY,
-        value: value,
+        value: JSON.stringify(fullState),
       });
     } catch (e) {
       console.error('[platform] StorageSet ошибка:', e);
@@ -186,7 +205,15 @@ window.Platform = (() => {
   }
 
   async function load() {
-    if (!ready) return null;
+    if (!ready) {
+      try {
+        const raw = localStorage.getItem(DEV_SAVE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.warn('[platform] dev-сейв не прочитался:', e);
+        return null;
+      }
+    }
     try {
       const res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
       const raw = res.keys && res.keys[0] && res.keys[0].value;
@@ -200,22 +227,47 @@ window.Platform = (() => {
   /* ---------- Реклама ----------
      VK Bridge: Promise резолвится ПОСЛЕ закрытия рекламы.
      onPause → send → onResume → если result.result=true → onRewarded. */
-  async function showInterstitial(onPause, onResume) {
+  function showInterstitial(onPause, onResume) {
     if (!ready) {
       console.warn('[platform] dev: interstitial пропущен');
-      if (onResume) onResume();
+      if (onResume) onResume(false);
       return;
     }
     if (onPause) onPause();
-    try {
-      await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
-    } catch (e) {
-      console.warn('[platform] interstitial недоступен:', e);
-    }
-    if (onResume) onResume();
+    let settled = false;
+    // Единая точка выхода: settle-once. Опоздавший ответ моста ПОСЛЕ
+    // сработавшего таймаута не снимет паузу второй раз и не сдвинет
+    // кулдаун гейта в main.js повторно.
+    const finish = (wasShown, reason) => {
+      if (settled) return;
+      settled = true;
+      console.log('[platform] interstitial завершён:', reason, '| показан:', wasShown);
+      if (onResume) onResume(wasShown);
+    };
+    withTimeout(
+      vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' }),
+      AD_HANG_TIMEOUT_MS,
+    )
+      .then(() => finish(true, 'реклама закрыта (resolve)'))
+      .catch((e) => {
+        console.warn('[platform] interstitial недоступен/завис:', e);
+        // wasShown=false — показ НЕ состоялся: main.js не двигает
+        // кулдаун и счётчик гейта (см. ЭТАП 2, п.1.3).
+        finish(false, 'ошибка/таймаут');
+      });
   }
 
-  async function showRewarded(onRewarded, onPause, onResume) {
+  /* Целевое правило рекламы (ЭТАП 2, п.1.1, стандарт студии, эталон
+     Color Sort/vk_platform.js): удержание награды законно ТОЛЬКО при
+     явном ответе площадки «ролик показан, но не досмотрен» — у ВК это
+     УСПЕШНО разрешившийся промис с res.result !== true (осознанный
+     отказ игрока). Все прочие пути — reject (нет филла, adblock,
+     ошибка моста), таймаут, отсутствие SDK — выдают подсказку
+     БЕСПЛАТНО: недоступная реклама не должна быть тупиком для игрока.
+     Кнопка при этом не прячется, подпись ролик не обещает (main.js).
+     Предпроверка isRewardedAvailable() остаётся первым эшелоном —
+     здесь runtime-фолбэк на ФАКТИЧЕСКИЙ сбой показа. */
+  function showRewarded(onRewarded, onPause, onResume) {
     if (!ready) {
       console.warn('[platform] dev: rewarded → награда выдана');
       if (onRewarded) onRewarded();
@@ -223,14 +275,30 @@ window.Platform = (() => {
       return;
     }
     if (onPause) onPause();
-    try {
-      const res = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
+    let settled = false;
+    const finish = (grantReward, reason) => {
+      if (settled) return;
+      settled = true;
+      // Видимый эффект — строго после onResume(), как в platform.js.
       if (onResume) onResume();
-      if (res.result === true && onRewarded) onRewarded();
-    } catch (e) {
-      console.warn('[platform] rewarded недоступен:', e);
-      if (onResume) onResume();
-    }
+      console.log('[platform] rewarded завершён:', reason, '| награда:', grantReward);
+      if (grantReward && onRewarded) onRewarded();
+    };
+    withTimeout(
+      vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' }),
+      AD_HANG_TIMEOUT_MS,
+    )
+      .then((res) => {
+        if (res && res.result === true) {
+          finish(true, 'ролик досмотрен (result=true)');
+        } else {
+          finish(false, 'ролик показан, но не досмотрен (result!=true) — награды нет');
+        }
+      })
+      .catch((e) => {
+        console.warn('[platform] rewarded недоступна/зависла — выдаём подсказку бесплатно:', e);
+        finish(true, 'ошибка/таймаут — выдано бесплатно');
+      });
   }
 
   /* ---------- Стики-баннер (задача Б) ----------
@@ -255,57 +323,25 @@ window.Platform = (() => {
     });
   }
 
-  /* ---------- Косметические покупки (задача 1/2, ИНАП «Мятная бумага») ----------
-     canPurchase() — платформенная возможность, а не проверка наличия
-     конкретного товара (её нет в API).
+  /* ---------- Косметические покупки ----------
+     Присутствуют в контракте про запас (см. заголовок файла) — эта сборка
+     (задачи А+Б) их не вызывает, витрины нет. canPurchase() — платформенная
+     возможность, а не проверка наличия конкретного товара (её нет в API).
      https://github.com/VKCOM/vk-bridge (packages/core/src/types/data.ts:
-     OrderRequestOptions {type:'item', item}, статус 'cancel'|'success'|'fail').
-
-     purchase(): VKWebAppShowOrderBox — статус в ответе СИНХРОННЫЙ и приходит
-     с клиента, он НЕ подтверждает реальное списание (клиент подделываем).
-     Реальное подтверждение — уведомление ВК на сервер разработчика
-     (dev.vk.com/ru/api/payments/notifications), поэтому после успешного
-     клиентского статуса дополнительно сверяемся с сервером через
-     GAME_CONFIG.vkOrderVerifyUrl. Пусто/недоступен → покупка НЕ считается
-     успешной (без ложного success), игрок видит понятную ошибку, игра не
-     виснет — см. main.js (storeErrorServer). */
+     OrderRequestOptions {type:'item', item}, статус 'cancel'|'success'|'fail'). */
   function canPurchase() { return true; }
 
   async function purchase(itemId) {
     if (!ready) {
-      console.warn('[platform] dev: purchase → успех симулирован (сервер не нужен в dev-режиме)');
+      console.warn('[platform] dev: purchase → успех симулирован');
       return { success: true };
     }
-
-    let orderRes;
     try {
-      orderRes = await vkBridge.send('VKWebAppShowOrderBox', { type: 'item', item: itemId });
+      const res = await vkBridge.send('VKWebAppShowOrderBox', { type: 'item', item: itemId });
+      return { success: res && res.status === 'success' };
     } catch (e) {
-      console.warn('[platform] purchase: OrderBox отменён/ошибка:', e);
-      return { success: false, error: 'order_failed' };
-    }
-    if (!orderRes || orderRes.status !== 'success') {
-      return { success: false, error: 'order_' + ((orderRes && orderRes.status) || 'unknown') };
-    }
-
-    const verifyUrl = window.GAME_CONFIG && window.GAME_CONFIG.vkOrderVerifyUrl;
-    if (!verifyUrl) {
-      console.warn('[platform] purchase: сервер верификации не настроен (config.js пуст) — покупка НЕ подтверждена');
-      return { success: false, error: 'server_unreachable' };
-    }
-
-    try {
-      const timeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000));
-      const resp = await Promise.race([
-        fetch(verifyUrl + '?item=' + encodeURIComponent(itemId)),
-        timeoutP,
-      ]);
-      if (!resp.ok) throw new Error('http ' + resp.status);
-      const body = await resp.json();
-      return { success: body && body.owned === true };
-    } catch (e) {
-      console.warn('[platform] purchase: сервер верификации недоступен:', e);
-      return { success: false, error: 'server_unreachable' };
+      console.warn('[platform] purchase недоступна:', e);
+      return { success: false };
     }
   }
 
@@ -318,5 +354,6 @@ window.Platform = (() => {
     showInterstitial, showRewarded, showBanner,
     canPurchase, purchase,
     gameplayStart, gameplayStop,
+    SAVE_SIZE_GUARD_BYTES, AD_HANG_TIMEOUT_MS,
   };
 })();
