@@ -182,25 +182,38 @@ window.Platform = (() => {
 
   /* ---------- Сохранение ----------
      VKWebAppStorageSet — VK-серверное хранилище, изолировано от OK. */
+  /* Возвращает true, если запись ПОДТВЕРЖДЕНА, и false, если площадка
+     отказала. Раньше save() возвращал undefined в обоих случаях, и
+     вызывающий не мог отличить удачу от неудачи. Понадобилось это
+     ЭТАПУ 5, добор п.1: main.js/persist() пропускает повторную запись
+     того же состояния и обязан обновлять кэш «последнего записанного»
+     ТОЛЬКО по подтверждению. Иначе неудачная запись пометила бы
+     состояние как сохранённое, следующая попытка была бы опознана как
+     дубль и не ушла бы никогда — мягкий сбой площадки превратился бы в
+     настоящую потерю прогресса.
+     Ошибка по-прежнему НЕ пробрасывается: падать на сейве нельзя. */
   async function save(fullState) {
     if (!ready) {
       // dev-фолбэк: платформы нет — пишем в localStorage, чтобы прогресс
       // переживал перезагрузку страницы на localhost/dev-URL.
       try {
         localStorage.setItem(DEV_SAVE_KEY, JSON.stringify(fullState));
+        return true;
       } catch (e) {
         // dev-режим — падать нельзя.
         console.warn('[platform] dev-сейв не записался:', e);
+        return false;
       }
-      return;
     }
     try {
       await vkBridge.send('VKWebAppStorageSet', {
         key:   STORAGE_KEY,
         value: JSON.stringify(fullState),
       });
+      return true;
     } catch (e) {
       console.error('[platform] StorageSet ошибка:', e);
+      return false;
     }
   }
 
