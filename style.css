@@ -218,10 +218,14 @@ html, body {
 }
 .icon-btn:active { transform: scale(0.96); }
 
-/* Область под поле: между шапкой и списком слов. */
+/* Область под поле: между лентой запаса и списком слов.
+   ЭТАП 3: верх сдвинут с 64 на 88 — под шапкой появилась лента запаса
+   (.energy-row-game, тоже absolute: весь игровой экран собран на
+   абсолютном позиционировании, поточный элемент здесь уехал бы в центр
+   и лёг под поле). */
 .board-wrap {
   position: absolute;
-  top: 64px; left: 0; right: 0; bottom: 188px;
+  top: 88px; left: 0; right: 0; bottom: 188px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -332,11 +336,16 @@ html, body {
 
 /* Фаза 5 — подсказка. */
 .cell.hint { box-shadow: inset 0 0 0 3px #f59e0b; }  /* янтарная рамка = подсказанная буква */
-.hint-btn {
+/* ЭТАП 3: позиционирование переехало с кнопки на ОБЁРТКУ — бейдж
+   остатка бесплатных подсказок должен висеть у угла кнопки, а у
+   absolute-кнопки нет собственной системы координат для потомка. */
+.hint-wrap {
   position: absolute;
   left: 50%;
   bottom: max(28px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
+}
+.hint-btn {
   border: 0;
   border-radius: var(--radius);
   min-height: 48px;
@@ -348,7 +357,166 @@ html, body {
   cursor: pointer;
   border: 1px solid var(--tile-border);
 }
-.hint-btn:active { transform: translateX(-50%) scale(0.98); }
+.hint-btn:active { transform: scale(0.98); }
+
+/* Бейдж бесплатных подсказок (награда серии входов). Скрыт при нуле —
+   пустой кружок «0» читался бы как поломка, а не как отсутствие. */
+.hint-bonus-badge {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--accent2);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(43,39,35,0.25);
+}
+.hint-bonus-badge[hidden] { display: none; }
+
+/* ============================================================
+   МОДУЛЬ УДЕРЖАНИЯ (ЭТАП 3): запас, серия, стена.
+   Одна разметка .energy-row живёт в трёх местах (меню, игровой экран,
+   стена) — здесь только раскладка, числа и тексты ставит main.js.
+   Новых цветов не заводим: всё из :root (тёплая бумага).
+   ============================================================ */
+.energy-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.energy-icon { font-size: 15px; filter: grayscale(0.15); }
+.energy-value {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.energy-line { flex: 1 1 100%; }
+
+/* На игровом экране строка идёт тонкой лентой под шапкой: одна строка,
+   без переноса — вертикаль там нужна полю, а не тексту. */
+.energy-row-game {
+  position: absolute;
+  top: 64px; left: 0; right: 0;
+  margin: 0;
+  padding: 0 14px;
+  max-width: none;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+.energy-row-game .energy-value { font-size: 14px; }
+.energy-row-game .energy-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.streak-line {
+  margin: -8px 0 18px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* --- Стена: запас на нуле --- */
+#energy-wall {
+  justify-content: flex-start;
+  padding: 0;
+}
+.wall-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  padding: 0 24px max(24px, env(safe-area-inset-bottom));
+}
+.wall-icon {
+  font-size: 44px;
+  line-height: 1;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+/* На стене строка состояния и вторая молния не нужны: то же самое
+   крупно говорит заголовок стены, а дубль читается как ошибка рендера.
+   Остаётся только счёт запаса — 0 из 15. */
+.energy-row-wall { margin-bottom: 2px; }
+.energy-row-wall .energy-line { display: none; }
+.energy-row-wall .energy-icon { display: none; }
+.wall-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.wall-text {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+.wall-sub {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+.wall-box .btn { width: 100%; max-width: 300px; }
+
+/* --- Тост наград модуля --- */
+.retention-toast {
+  position: fixed;
+  left: 50%;
+  top: max(14px, env(safe-area-inset-top));
+  transform: translate(-50%, -12px);
+  z-index: 40;
+  max-width: 88vw;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--tile-border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(43,39,35,0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.retention-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.retention-toast[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .retention-toast { transition: none; }
+}
+
+/* Узкий экран (320px): строка запаса на игровом экране переносится под
+   число, иначе многоточие съедает всё сообщение. */
+@media (max-width: 360px) {
+  .energy-row-game { flex-wrap: wrap; }
+  .energy-row-game .energy-line { flex: 1 1 100%; text-align: left; }
+  .wall-title { font-size: 19px; }
+}
 
 /* Фаза 6 — анимации (тряска ошибки, празднование победы, конфетти). */
 @keyframes shake {
