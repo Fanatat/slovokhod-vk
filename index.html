@@ -5,182 +5,114 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <title>Кот и японские кроссворды</title>
-  <link rel="stylesheet" href="style.css?v=51" />
+  <title>Словоход</title>
+  <link rel="stylesheet" href="style.css?v=3" />
 
-  <!-- VK Bridge (@vkontakte/vk-bridge 3.0.2) — вшит локально, без CDN. -->
-  <script src="vk-bridge.min.js"></script>
+  <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
+       Вне билда (локальная разработка) маркер НЕ заменяется:
+       platform.js сам деградирует в dev-режим без SDK. -->
+  <!--PLATFORM_SCRIPT-->
 </head>
 <body>
   <div id="app">
-
-    <!-- Экран загрузки -->
+    <!-- Экран 1: загрузка -->
     <section id="loading" class="screen is-active">
       <div class="loader" aria-hidden="true"></div>
       <p class="loading-text" data-i18n="loading">Загрузка…</p>
     </section>
 
-    <!-- Главное меню -->
+    <!-- Экран 2: главное меню -->
     <section id="menu" class="screen">
-      <button id="btn-sound-menu" class="icon-btn sound-btn" aria-label="Звук">♪</button>
       <header class="menu-head">
-        <h1 class="game-title" data-i18n="gameTitle">Кот и японские кроссворды</h1>
-        <p class="game-sub" data-i18n="gameSub">японский кроссворд</p>
+<h1 class="game-title" data-i18n="gameTitle">Филворд</h1>
+        <p class="game-sub" data-i18n="gameSub">находи слова на ощупь</p>
       </header>
 
       <nav class="menu-actions">
         <button id="btn-continue" class="btn btn-secondary" hidden data-i18n="continue">Продолжить</button>
-        <button id="btn-play"     class="btn btn-primary"          data-i18n="play">Играть</button>
-        <button id="btn-daily"    class="btn btn-secondary" hidden data-i18n="daily">Ежедневный</button>
-        <button id="btn-shop"     class="btn btn-secondary"        data-i18n="shop">Магазин</button>
+        <button id="btn-play" class="btn btn-primary" data-i18n="play">Играть</button>
+        <button id="btn-levels" class="btn btn-secondary" data-i18n="levels">Уровни</button>
       </nav>
-      <p id="retention-streak-line" class="retention-line"></p>
-      <div class="daily-meta" hidden style="display:none">
-        <p id="daily-streak" class="daily-streak" hidden></p>
-        <button id="btn-calendar" class="icon-btn cal-icon-btn" aria-label="Календарь">▦</button>
+
+      <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
+
+      <!-- Подтверждение сброса прогресса -->
+      <div id="confirm" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="confirmTitle">Прогресс сбросится. Начать заново?</p>
+          <button id="btn-restart-yes" class="btn btn-primary" data-i18n="confirmYes">Начать заново</button>
+          <button id="btn-restart-no" class="btn btn-secondary" data-i18n="confirmNo">Отмена</button>
+        </div>
       </div>
 
       <p id="dev-badge" class="dev-badge" hidden>dev-режим: платформа не подключена</p>
     </section>
 
-    <!-- Экран календаря -->
-    <section id="calendar" class="screen">
-      <button id="btn-back-cal" class="icon-btn cal-back-btn" aria-label="Назад">‹</button>
-      <div class="cal-wrap">
-        <h2 id="cal-title" class="cal-title"></h2>
-        <div id="cal-weekdays" class="cal-weekdays"></div>
-        <div id="cal-grid" class="cal-grid"></div>
-      </div>
+    <!-- Экран 3: выбор уровня -->
+    <section id="levels" class="screen">
+      <header class="lv-head">
+        <button id="btn-levels-back" class="icon-btn" aria-label="Назад">‹</button>
+        <span class="lv-title" data-i18n="chooseLevel">Выбор уровня</span>
+        <span id="lv-total" class="lv-total"></span>
+      </header>
+      <div id="levels-grid" class="levels-grid"></div>
     </section>
 
-    <!-- Экран выбора сложности -->
-    <section id="category" class="screen">
-      <button id="btn-back-cat" class="icon-btn cat-back-btn" aria-label="Назад">‹</button>
-      <h2 class="cat-screen-title" data-i18n="chooseLevel">Выберите сложность</h2>
-      <p id="category-total" class="cat-total"></p>
-      <p id="retention-drip-line" class="retention-line"></p>
-      <button id="retention-rewarded-btn" class="btn btn-secondary retention-rewarded-btn" hidden></button>
-      <div id="category-list" class="category-list"></div>
-    </section>
-
-    <!-- Экран косметики (Задача E — каркас, Задача I — несколько гамм) -->
-    <section id="shop" class="screen">
-      <button id="btn-back-shop" class="icon-btn cat-back-btn" aria-label="Назад">‹</button>
-      <h2 class="cat-screen-title" data-i18n="shopTitle">Косметика</h2>
-
-      <p id="shop-locked-status" class="shop-status" hidden></p>
-      <div id="shop-list" class="shop-list"></div>
-    </section>
-
-    <!-- Экран игры -->
+    <!-- Экран 4: игра -->
     <section id="game" class="screen">
       <header class="game-head">
         <button id="btn-back" class="icon-btn" aria-label="Назад">‹</button>
-        <span id="game-level-label" class="level-label"></span>
-        <button id="btn-clear-board" class="icon-btn" aria-label="Очистить">⟲</button>
-        <button id="btn-sound-game" class="icon-btn sound-btn" aria-label="Звук">♪</button>
+        <div class="game-head-center">
+          <span id="game-level" class="game-level"></span>
+          <span id="game-theme" class="game-theme"></span>
+        </div>
+        <div class="game-head-right">
+          <button id="btn-restart-level" class="icon-btn" aria-label="Заново" title="Заново">↻</button>
+          <button id="btn-sound-game" class="icon-btn snd" aria-label="Звук" title="Звук">♪</button>
+          <span id="game-counter" class="game-counter">0 / 0</span>
+        </div>
       </header>
-      <div id="puzzle-container" class="puzzle-container"></div>
-      <p id="level-hint" class="level-hint" hidden data-i18n="levelHint">Проведи по клеткам, чтобы закрасить</p>
-      <div class="mode-bar">
-        <button class="mode-btn is-active" data-mode="1" data-i18n="modeFill">■ Закрасить</button>
-        <button class="mode-btn"           data-mode="2" data-i18n="modeCross">✕ Крестик</button>
-        <button id="btn-hint" class="hint-btn"><span class="hint-icon-wrap" aria-hidden="true"><svg class="ad-icon" viewBox="0 0 16 16" width="15" height="15" focusable="false"><rect x="0.5" y="2.5" width="15" height="11" rx="2.5"/><path d="M6.4 5.6v4.8l4.6-2.4z"/></svg><span id="hint-badge" class="hint-badge" hidden></span></span><span class="hint-label"><span data-i18n="hint">Подсказка</span><span id="hint-ad-caption" class="hint-ad-caption" data-i18n="hintAdCaption">за рекламу</span></span></button>
+      <div id="board-wrap" class="board-wrap">
+        <div id="board" class="board"></div>
       </div>
 
-      <!-- Победный оверлей -->
-      <div id="win-overlay" class="overlay" hidden>
-        <div id="confetti-container" class="confetti-container" aria-hidden="true"></div>
-        <div class="win-card">
-          <div class="silhouette-mount">
-            <canvas id="win-canvas" class="win-canvas"></canvas>
+      <p id="howto" class="howto" hidden data-i18n="howto">Проведи пальцем по соседним буквам</p>
+      <div id="word-list" class="word-list"></div>
+      <button id="btn-hint" class="hint-btn" data-i18n="hint">Подсказка за рекламу</button>
+
+      <!-- Оверлей обучения: показывается один раз на первом уровне -->
+      <div id="tutorial" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="howToPlay">Как играть</p>
+          <div class="tut-demo">
+            <div class="tut-cell tut-path" style="animation-delay:0s">К</div>
+            <div class="tut-cell tut-path" style="animation-delay:0.45s">О</div>
+            <div class="tut-cell tut-empty"></div>
+            <div class="tut-cell tut-path" style="animation-delay:0.9s">Т</div>
           </div>
-          <p id="win-theme-label" class="win-theme"></p>
-          <button id="btn-next-level" class="btn btn-primary" data-i18n="next">Дальше</button>
+          <p class="tut-text" data-i18n="tutorialText">Веди пальцем по соседним буквам, чтобы составить слово</p>
+          <button id="btn-tutorial-ok" class="btn btn-primary" data-i18n="tutorialOk">Понятно!</button>
         </div>
       </div>
 
+      <!-- Оверлей победы -->
+      <div id="win" class="overlay" hidden>
+        <div class="overlay-card">
+          <p class="overlay-title" data-i18n="levelDone">Уровень пройден</p>
+          <button id="btn-next" class="btn btn-primary" data-i18n="next">Дальше</button>
+          <p id="win-score" class="win-score"></p>
+          <p id="win-best" class="win-best"></p>
+          <p id="win-new" class="win-new" hidden data-i18n="newRecord">Новый рекорд!</p>
+        </div>
+      </div>
     </section>
-
-    <!-- Онбординг: одноразовый оверлей «Как читать числа» -->
-    <div id="onboarding-overlay" class="overlay" hidden>
-      <div class="onboarding-card">
-        <h2 class="onboarding-title" data-i18n="howToTitle">Как читать числа</h2>
-
-        <!-- Наглядный пример: подсказка «3 1» → три закрашенных, пропуск, одна -->
-        <div class="how-example" aria-hidden="true">
-          <div class="how-clue">3&nbsp;1</div>
-          <div class="how-cells">
-            <div class="how-cell filled"></div>
-            <div class="how-cell filled"></div>
-            <div class="how-cell filled"></div>
-            <div class="how-cell"></div>
-            <div class="how-cell filled"></div>
-          </div>
-        </div>
-
-        <p class="onboarding-text" data-i18n="howToLine1">Числа — длины закрашенных серий слева направо и сверху вниз.</p>
-        <p class="onboarding-text" data-i18n="howToLine2">Между сериями — хотя бы одна пустая клетка.</p>
-        <button id="btn-onboarding-ok" class="btn btn-primary" data-i18n="howToOk">Понятно!</button>
-      </div>
-    </div>
-
-    <!-- Подтверждение очистки поля (свободный режим — ошибки не подсвечиваются,
-         поэтому нужен явный способ начать текущий уровень заново) -->
-    <div id="clear-confirm-overlay" class="overlay" hidden>
-      <div class="onboarding-card">
-        <p class="onboarding-text" data-i18n="clearConfirmText">Очистить поле? Прогресс на этом уровне будет потерян</p>
-        <div class="confirm-actions">
-          <button id="btn-clear-cancel" class="btn btn-secondary" data-i18n="clearCancel">Отмена</button>
-          <button id="btn-clear-yes"    class="btn btn-primary"   data-i18n="clearYes">Да</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- RV-загрузка (2026-09-06, баг-репорт основателя: показ Platform.showRewarded
-         мог молча "виснуть" на десятки секунд без единого признака жизни на
-         экране — п.190/шрам Color Sort требовал не блокировать/не прятать
-         САМУ КНОПКУ во время показа, но это не значит "не показывать вообще
-         никакого состояния": игрок должен видеть, что что-то происходит.
-         Живёт вне .screen, как build-tag — виден поверх любого активного
-         экрана. main.js: showAdLoadingOverlay()/hideAdLoadingOverlay(),
-         оборачивают оба вызова Platform.showRewarded (onHintClick,
-         onRewardedButtonClick). -->
-    <div id="ad-loading-overlay" class="ad-loading-overlay" hidden>
-      <div class="loader" aria-hidden="true"></div>
-      <p class="ad-loading-text" data-i18n="adLoading">Загрузка рекламы…</p>
-    </div>
-
-    <!-- Debug-оверлей (2026-09-06, живой Android-баг с rewarded): без
-         физического устройства и remote debugging (chrome://inspect)
-         консольный лог не увидеть — печатает те же строки прямо на
-         экране, чтобы можно было просто сфотографировать телефон.
-         Активируется ?debug=1 в адресной строке (main.js: DEBUG_MODE) —
-         invisible по умолчанию, нулевой риск для обычных игроков.
-         z-index выше #ad-loading-overlay — виден поверх него тоже. -->
-    <div id="debug-overlay" class="debug-overlay" hidden>
-      <div class="debug-overlay-head">
-        DEBUG
-        <button id="debug-clear" class="debug-clear-btn" type="button" aria-label="Очистить лог">×</button>
-      </div>
-      <div id="debug-log" class="debug-log"></div>
-    </div>
-
-    <!-- Задача F: версия/билд, чтобы основатель видел, свежий ли билд открылся.
-         Живёт вне .screen — виден на любом активном экране. -->
-    <span id="build-tag" class="build-tag" aria-hidden="true"></span>
-    <p id="retention-reward-toast" class="retention-toast" hidden></p>
-
   </div>
 
-<script src="i18n.js?v=51"></script>
-  <script src="platform.js?v=51"></script>
-  <script src="save.js?v=51"></script>
-  <script src="sound.js?v=51"></script>
-  <script src="levels.js?v=51"></script>
-  <script src="nonogram.js?v=51"></script>
-  <script src="build.js?v=51"></script>
-  <script src="retention.js?v=51"></script>
-  <script src="main.js?v=51"></script>
+  <script src="i18n.js"></script>
+  <script src="platform.js"></script>
+  <script src="levels.js"></script>
+  <script src="board.js"></script>
+  <script src="sound.js"></script>
+  <script src="main.js"></script>
 </body>
 </html>
