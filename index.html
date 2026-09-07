@@ -6,12 +6,30 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Словоход</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+
+  <!-- КЕШ-БАСТИНГ (ЭТАП 2, п.3.1). Каждый рантайм-тег ниже (этот <link>
+       и все <script> в конце body) несёт ПЛЕЙСХОЛДЕР версии, который
+       build.py заменяет номером билда автоштамповкой — см.
+       build.py:stamp_cache_bust и список VERSIONED_ASSETS. Сборка
+       ПАДАЕТ, если хоть один файл не проштамповался ровно один раз,
+       и если плейсхолдер где-то остался непроштампованным.
+       Руками версии больше не проставляются: до этапа 2 board.js и
+       sound.js не имели версии вовсе — браузер игрока отдал бы их из
+       кэша после обновления игровой логики, и часть игроков получила
+       бы полусобранную версию (шрам ТЗ №19 Color Sort).
+       Вне билда плейсхолдер остаётся как есть — это нормально, значит
+       билд не собирался через build.py. -->
+  <link rel="stylesheet" href="style.css?v=18" />
 
   <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
        Вне билда (локальная разработка) маркер НЕ заменяется:
        platform.js сам деградирует в dev-режим без SDK. -->
-  <!--PLATFORM_SCRIPT-->
+  <script src="vk-bridge.min.js"></script>
+
+  <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
+       window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
+       заменяется: main.js покажет плашку "dev" вместо номера. -->
+  <script>window.BUILD = 'vk-b18-04b7947-20260824';</script>
 </head>
 <body>
   <div id="app">
@@ -28,22 +46,29 @@
         <p class="game-sub" data-i18n="gameSub">находи слова на ощупь</p>
       </header>
 
+      <!-- Запас (ЭТАП 3, п.4): ОДНА разметка, три места — меню, игровой
+           экран, стена. main.js обновляет все инстансы разом по классам
+           (.energy-now/.energy-cap/.energy-line), а не по id, поэтому
+           четвёртое место добавляется разметкой, без правки JS. -->
+      <div class="energy-row">
+        <span class="energy-icon" aria-hidden="true">⚡</span>
+        <span class="energy-value"><span class="energy-now">–</span>&#8202;/&#8202;<span class="energy-cap">–</span></span>
+        <span class="energy-line"></span>
+      </div>
+
+      <!-- Серия входов — ОТДЕЛЬНАЯ шкала от запаса (награда идёт в
+           подсказки). Видна постоянно: игрок должен знать, что серия
+           идёт, ДО того как она прервётся. Стоит рядом с запасом:
+           обе строки модуля читаются одним взглядом. -->
+      <p id="streak-line" class="streak-line"></p>
+
       <nav class="menu-actions">
-        <button id="btn-continue" class="btn btn-secondary" hidden data-i18n="continue">Продолжить</button>
+        <button id="btn-continue" class="btn btn-primary" hidden data-i18n="continue">Продолжить</button>
         <button id="btn-play" class="btn btn-primary" data-i18n="play">Играть</button>
         <button id="btn-levels" class="btn btn-secondary" data-i18n="levels">Уровни</button>
       </nav>
 
       <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
-
-      <!-- Подтверждение сброса прогресса -->
-      <div id="confirm" class="overlay" hidden>
-        <div class="overlay-card">
-          <p class="overlay-title" data-i18n="confirmTitle">Прогресс сбросится. Начать заново?</p>
-          <button id="btn-restart-yes" class="btn btn-primary" data-i18n="confirmYes">Начать заново</button>
-          <button id="btn-restart-no" class="btn btn-secondary" data-i18n="confirmNo">Отмена</button>
-        </div>
-      </div>
 
       <p id="dev-badge" class="dev-badge" hidden>dev-режим: платформа не подключена</p>
     </section>
@@ -72,13 +97,25 @@
           <span id="game-counter" class="game-counter">0 / 0</span>
         </div>
       </header>
+      <div class="energy-row energy-row-game">
+        <span class="energy-icon" aria-hidden="true">⚡</span>
+        <span class="energy-value"><span class="energy-now">–</span>&#8202;/&#8202;<span class="energy-cap">–</span></span>
+        <span class="energy-line"></span>
+      </div>
+
       <div id="board-wrap" class="board-wrap">
         <div id="board" class="board"></div>
       </div>
 
       <p id="howto" class="howto" hidden data-i18n="howto">Проведи пальцем по соседним буквам</p>
       <div id="word-list" class="word-list"></div>
-      <button id="btn-hint" class="hint-btn" data-i18n="hint">Подсказка за рекламу</button>
+      <!-- Бейдж — СОСЕД кнопки, не её потомок: main.js переписывает
+           textContent кнопки (подпись зависит от доступности рекламы),
+           и вложенный span был бы стёрт при первой же перерисовке. -->
+      <div class="hint-wrap">
+        <button id="btn-hint" class="hint-btn" data-i18n="hint">Подсказка за рекламу</button>
+        <span id="hint-bonus-badge" class="hint-bonus-badge" hidden></span>
+      </div>
 
       <!-- Оверлей обучения: показывается один раз на первом уровне -->
       <div id="tutorial" class="overlay" hidden>
@@ -99,20 +136,56 @@
       <div id="win" class="overlay" hidden>
         <div class="overlay-card">
           <p class="overlay-title" data-i18n="levelDone">Уровень пройден</p>
-          <button id="btn-next" class="btn btn-primary" data-i18n="next">Дальше</button>
           <p id="win-score" class="win-score"></p>
           <p id="win-best" class="win-best"></p>
           <p id="win-new" class="win-new" hidden data-i18n="newRecord">Новый рекорд!</p>
+          <button id="btn-next" class="btn btn-primary" data-i18n="next">Дальше</button>
         </div>
+      </div>
+    </section>
+
+    <!-- Экран 5: стена (ЭТАП 3, п.4). Показывается ВМЕСТО старта нового,
+         ещё не пройденного уровня, когда запас на нуле. Обслуживает ВСЕ
+         пути входа (сетка уровней, «Продолжить», «Дальше» после победы) —
+         см. requestOpenLevel в main.js. Рестарт текущего и повтор уже
+         пройденного стену не показывают: они бесплатны. -->
+    <section id="energy-wall" class="screen">
+      <header class="lv-head">
+        <button id="btn-wall-back" class="icon-btn" aria-label="Назад">‹</button>
+        <span class="lv-title" data-i18n="energyLabel">Запас</span>
+        <span class="lv-total"></span>
+      </header>
+      <div class="wall-box">
+        <div class="wall-icon" aria-hidden="true">⚡</div>
+        <div class="energy-row energy-row-wall">
+          <span class="energy-icon" aria-hidden="true">⚡</span>
+          <span class="energy-value"><span class="energy-now">–</span>&#8202;/&#8202;<span class="energy-cap">–</span></span>
+          <span class="energy-line"></span>
+        </div>
+        <p id="wall-title" class="wall-title"></p>
+        <p id="wall-text" class="wall-text"></p>
+        <p id="wall-sub" class="wall-sub"></p>
+        <button id="btn-wall-menu" class="btn btn-primary"></button>
       </div>
     </section>
   </div>
 
-  <script src="i18n.js"></script>
-  <script src="platform.js"></script>
-  <script src="levels.js"></script>
-  <script src="board.js"></script>
-  <script src="sound.js"></script>
-  <script src="main.js"></script>
+  <!-- Тост наград модуля удержания (начисление запаса, награда серии).
+       СНАРУЖИ #app и над всем — всплывает поверх любого экрана. -->
+  <div id="retention-toast" class="retention-toast" hidden></div>
+
+  <!-- Плашка номера билда (стандарт с 2026-07-25) — СНАРУЖИ #app намеренно:
+       любой инструмент, который когда-нибудь будет снимать скриншот именно
+       игрового DOM-элемента (#app), эту плашку не захватит. Неинтерактивна,
+       текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
+  <div id="build-badge" aria-hidden="true"></div>
+
+  <script src="i18n.js?v=18"></script>
+  <script src="platform.js?v=18"></script>
+  <script src="levels.js?v=18"></script>
+  <script src="board.js?v=18"></script>
+  <script src="sound.js?v=18"></script>
+  <script src="retention.js?v=18"></script>
+  <script src="main.js?v=18"></script>
 </body>
 </html>
