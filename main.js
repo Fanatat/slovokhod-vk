@@ -24,6 +24,10 @@
   var elWinBest  = document.getElementById('win-best');
   var elWinNew   = document.getElementById('win-new');
   var elWinEnergy = document.getElementById('win-energy'); // b19: «осталось N новых уровней»
+  var elWinMore = document.getElementById('win-more');     // b20: после последнего уровня
+  var elMenuMore = document.getElementById('menu-more');   // b20: та же строка в меню
+  var elEnergyFly = document.getElementById('energy-fly'); // b20: перелёт ⚡ к счётчику
+  var elEnergyPlus = document.getElementById('energy-plus');
   var btnNext = document.getElementById('btn-next');
   var btnHint = document.getElementById('btn-hint');
   var elTutorial = document.getElementById('tutorial');
@@ -146,6 +150,25 @@
   // Экран победы предупреждает о близкой стене, когда запаса осталось мало.
   var WIN_ENERGY_WARN = 3;
 
+  /* ---------- Золотое слово (b20, решение основателя 12.09) ----------
+     На десяти уровнях из первых пятнадцати одно слово цепочки — золотое:
+     найденное ВПЕРВЫЕ, оно даёт +1 к запасу мимо потолка (как награда
+     календаря) с перелётом значка ⚡ к счётчику и всплывающим «+1».
+     Разово на уровень: номера забранных уровней — в сейве (gw); рестарт
+     и повтор чип не золотят, абузить нечего. Цель — азарт и первая сессия
+     без стены и без принудительной рекламы (см. adLevelGate ниже). */
+  var GOLD_LEVELS = [1, 2, 4, 5, 7, 9, 10, 11, 13, 15];
+  var goldClaimed = [];   // номера уровней (1-based), где золотое слово уже забрано
+
+  function goldWordFor(index, level) {
+    if (GOLD_LEVELS.indexOf(index + 1) === -1) return null;
+    if (goldClaimed.indexOf(index + 1) !== -1) return null;
+    if (!level.chain || !level.chain.length) return null;
+    // Среднее слово цепочки: награда приходит в середине уровня, а не под
+    // оверлеем победы, который через 450 мс закрыл бы анимацию.
+    return level.chain[Math.floor(level.chain.length / 2)];
+  }
+
   // Гейт частоты interstitial (задача Б, п.4.7): каждый N-й уровень И не
   // чаще раза в T мс — оба условия обязательны. Гейт живёт в памяти
   // сессии (не в сейве) — на новый запуск игры счётчик сбрасывается.
@@ -172,8 +195,23 @@
   // ограничивает только НЕПРОШЕНУЮ рекламу. Запрошенный игроком ролик
   // (кнопка подсказки) показывается каждый раз — обработчик btnHint
   // ниже гейт не читает и счётчики не двигает.
-  var AD_LEVEL_GATE = 5;
-  var AD_MIN_INTERVAL_MS = 240000;
+  //
+  // b20 (решение основателя 12.09): первые AD_FREE_LEVELS уровней — без
+  // принудительной рекламы вовсе (игрок проходит их в своём темпе, это
+  // ~10 минут); дальше порог «уровней с последнего показа» зависит от
+  // номера пройденного уровня: до 30-го — каждый 3-й, до 80-го — каждый
+  // 4-й, дальше — каждый 5-й. Кулдаун 240000 → 60000 мс: при уровне в
+  // 30–40 с «каждый 3-й» — это раз в 90–120 с, и старый кулдаун молча
+  // вернул бы «раз в 6–8 уровней» (расписание заменяет Р-СЛ7); 60 с
+  // остаются страховкой от двойного показа на быстрых повторах.
+  var AD_FREE_LEVELS = 15;
+  function adLevelGate(levelNo) {
+    if (levelNo <= AD_FREE_LEVELS) return 0;   // 0 — рекламы нет
+    if (levelNo <= 30) return 3;
+    if (levelNo <= 80) return 4;
+    return 5;
+  }
+  var AD_MIN_INTERVAL_MS = 60000;
   var levelsSinceAd = 0;
   var lastAdShownAt = 0;
 
@@ -223,6 +261,7 @@
       fullState.dp = dailyPending;
       fullState.gh = goldHints;
       fullState.wa = wallAds;
+      fullState.gw = goldClaimed;   // b20: забранные золотые слова (номера уровней)
     }
 
     /* ---------- Пропуск повторной записи (ЭТАП 5, добор п.1) ----------
@@ -447,10 +486,10 @@
      реже всех. Модуль это переживает: applyDripTick при backlog ≥ cap
      только подтягивает штамп, spendEnergy списывает штатно, UI покажет
      «20 / 15». Объект состояния собирается той же формой, что в
-     retention.js (пять полей) — единственное место в игре, где это
-     делается мимо модуля. */
-  function grantEnergyBonus(n, day) {
-    if (!retentionState) return;
+     retention.js (пять полей) — energyPlusRaw ниже единственная функция
+     в игре, которая делает это мимо модуля; её зовут награда календаря
+     и золотое слово (b20). */
+  function energyPlusRaw(n) {
     retentionState = {
       dripOpened: retentionState.dripOpened + n,
       lastTickAt: retentionState.lastTickAt,
@@ -458,10 +497,77 @@
       streakLen: retentionState.streakLen,
       streakRewards: retentionState.streakRewards,
     };
+  }
+  function grantEnergyBonus(n, day) {
+    if (!retentionState) return;
+    energyPlusRaw(n);
     console.log('[calendar] день ' + day + ': +' + n + ' к запасу, стало ' + retentionState.dripOpened);
     persistProgress();
     renderEnergy();
     showRetentionToast(I18N.fill('energyToastGain', { n: n }));
+  }
+
+  /* Золотое слово найдено (b20): +1 мимо потолка, запись в сейв, перелёт ⚡. */
+  function claimGoldWord(index, chip) {
+    if (!retentionState) return;
+    goldClaimed.push(index + 1);
+    energyPlusRaw(1);
+    console.log('[gold] уровень ' + (index + 1) + ': золотое слово найдено, +1 к запасу, стало ' +
+      retentionState.dripOpened);
+    persist({ level: index, max: maxUnlocked, records: records });
+    if (chip) chip.classList.remove('gold');
+    if (typeof Sound.gold === 'function') Sound.gold();
+    flyEnergy(chip, function () { renderEnergy(); popPlusOne(); });
+  }
+
+  /* Перелёт ⚡ от чипа к значку запаса в шапке: 650 мс по прямой, растёт к
+     концу (CSS .energy-fly). Без DOM-геометрии (тесты) и при reduced-motion —
+     сразу done(): счётчик обновится, «+1» всплывёт без перелёта. */
+  function flyEnergy(chip, done) {
+    var target = elGame ? elGame.querySelector('.energy-icon') : null;
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (!chip || !target || !elEnergyFly || reduced ||
+        typeof chip.getBoundingClientRect !== 'function' ||
+        typeof requestAnimationFrame !== 'function') { done(); return; }
+    var a = chip.getBoundingClientRect(), b = target.getBoundingClientRect();
+    var x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
+    var dx = (b.left + b.width / 2) - x0, dy = (b.top + b.height / 2) - y0;
+    elEnergyFly.style.left = (x0 - 9) + 'px';
+    elEnergyFly.style.top = (y0 - 9) + 'px';
+    elEnergyFly.style.transform = 'translate(0,0) scale(1)';
+    elEnergyFly.hidden = false;
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      elEnergyFly.hidden = true;
+      elEnergyFly.style.transform = '';
+      target.classList.add('pulse');
+      setTimeout(function () { target.classList.remove('pulse'); }, 260);
+      done();
+    }
+    // Два кадра: первый фиксирует стартовую позицию, второй запускает transition.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        elEnergyFly.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.35)';
+      });
+    });
+    elEnergyFly.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, 900);   // страховка: transitionend может не прийти (вкладка в фоне)
+  }
+
+  /* «+1» всплывает над счётчиком запаса и тает (CSS plus-up, 900 мс). */
+  function popPlusOne() {
+    var target = elGame ? elGame.querySelector('.energy-value') : null;
+    if (!target || !elEnergyPlus || typeof target.getBoundingClientRect !== 'function') return;
+    var b = target.getBoundingClientRect();
+    elEnergyPlus.style.left = (b.right + 6) + 'px';          // правее счётчика, не над кнопкой «назад»
+    elEnergyPlus.style.top = (b.top - 6) + 'px';
+    elEnergyPlus.classList.remove('run');
+    elEnergyPlus.hidden = false;
+    void elEnergyPlus.offsetWidth;   // перезапуск анимации
+    elEnergyPlus.classList.add('run');
+    setTimeout(function () { elEnergyPlus.hidden = true; elEnergyPlus.classList.remove('run'); }, 950);
   }
 
   /* ---------- Ролик у стены (b19, гипотеза 2) ---------- */
@@ -661,6 +767,10 @@
     wallAds = (data && data.wa && typeof data.wa.d === 'string' && typeof data.wa.n === 'number')
       ? { d: data.wa.d, n: Math.max(0, Math.floor(data.wa.n)) }
       : { d: '', n: 0 };
+    // b20: забранные золотые слова. У сейва b19 поля нет — пусто.
+    goldClaimed = (data && Array.isArray(data.gw))
+      ? data.gw.filter(function (n) { return typeof n === 'number'; })
+      : [];
 
     // Такт за время, пока игра была закрыта.
     var prev = retentionState;
@@ -734,6 +844,8 @@
   function setMenuProgress(has) {
     btnContinue.hidden = !has;
     btnPlay.hidden = has;
+    // b20: всё пройдено — обещание продолжения видно и в меню.
+    if (elMenuMore) elMenuMore.hidden = !(Levels.count() > 0 && maxUnlocked >= Levels.count());
   }
 
   // Подпись кнопки подсказки: обещает ролик только если реклама реально
@@ -749,7 +861,7 @@
     btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
   }
 
-  function renderWordList(level) {
+  function renderWordList(level, goldWord) {
     if (!elWordList) return;
     elWordList.innerHTML = '';
     var chain = (level.chain && level.chain.length) ? level.chain : level.words.map(function (w) { return w.word; });
@@ -762,6 +874,7 @@
       }
       var span = document.createElement('span');
       span.className = 'word-chip' + (i === 0 ? ' current' : '');
+      if (goldWord && chain[i] === goldWord) span.classList.add('gold');   // b20
       span.dataset.word = chain[i];
       span.textContent = chain[i];
       elWordList.appendChild(span);
@@ -783,7 +896,9 @@
     elWin.hidden = true;
     if (elHowto) elHowto.hidden = (index !== 0);
     showScreen(elGame);
-    renderWordList(level);
+    // b20: золотое слово уровня (null — уровень не золотой или уже забрано).
+    var goldWord = goldWordFor(index, level);
+    renderWordList(level, goldWord);
 
     // Сохраняем прогресс (текущий уровень). Переживает обновление страницы (п.1.9).
     maxUnlocked = Math.max(maxUnlocked, index);
@@ -825,6 +940,8 @@
         // Пометить найденный чип: пых + зачёркнуть.
         var chip = document.querySelector('#word-list .word-chip[data-word="' + word + '"]');
         if (chip) { chip.classList.add('pop'); chip.classList.add('found'); chip.classList.remove('current'); }
+        // b20: золотое слово — разово, +1 к запасу с перелётом к счётчику.
+        if (goldWord && word === goldWord) { goldWord = null; claimGoldWord(index, chip); }
         // Подсветить следующее слово в цепочке (CSS-transition плавно проявит рамку).
         if (level.chain && chainPos < level.chain.length) {
           var nextChip = document.querySelector('#word-list .word-chip[data-word="' + level.chain[chainPos] + '"]');
@@ -879,6 +996,8 @@
           // b19: о близкой стене игрок узнаёт ДО того, как в неё упрётся.
           // Текст строки ставит renderEnergy() по классу .energy-line.
           if (elWinEnergy) elWinEnergy.hidden = !(retentionState && energyLeft() <= WIN_ENERGY_WARN);
+          // b20: после последнего уровня — обещание продолжения (решение основателя 12.09).
+          if (elWinMore) elWinMore.hidden = !isLast;
           elWin.hidden = false;
           popCard();
           confettiBurst();
@@ -1080,14 +1199,19 @@
       }
     }
 
-    // Гейт частоты (задача Б, п.4.7; числа — ЭТАП 2, п.1.4): каждый
-    // AD_LEVEL_GATE-й уровень И не чаще раза в AD_MIN_INTERVAL_MS —
+    // Гейт частоты (задача Б, п.4.7; расписание — b20, см. adLevelGate): каждый
+    // adLevelGate(N)-й уровень И не чаще раза в AD_MIN_INTERVAL_MS —
     // оба условия обязательны. Раньше показ был безусловным на каждый
     // переход (SDK сам якобы соблюдает интервал) — за 41 запуск на ВК
     // это дало 0 показов рекламы; гейт даёт предсказуемые точки показа.
+    // b20: порог по номеру только что пройденного уровня (currentIndex — ещё
+    // он). В зоне без рекламы счётчик держим на нуле: первый показ после неё
+    // приходит через полный порог, а не сразу на 16-м уровне.
+    var gate = adLevelGate(currentIndex + 1);
+    if (gate === 0) { levelsSinceAd = 0; proceed(); return; }
     levelsSinceAd++;
     var now = Date.now();
-    var gateOk = levelsSinceAd >= AD_LEVEL_GATE && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
+    var gateOk = levelsSinceAd >= gate && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
 
     if (!gateOk) {
       // ДОБОР ЭТАПА 2, п.1: счётчик levelsSinceAd здесь НЕ обнуляется —

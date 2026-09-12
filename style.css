@@ -15,6 +15,9 @@
   --accent2: #c2703c;        /* глина — текущее звено, акценты */
   --accent2-tint: #f1ddca;   /* светлый тон под фон чипа */
   --accent2-ink: #7a3f1d;    /* тёмный тон — текст на tint */
+  --gold: #d9a441;           /* золото — золотое слово (b20) */
+  --gold-tint: #f8e9c3;      /* светлый тон под фон золотого чипа */
+  --gold-ink: #7a5a12;       /* текст на золотом */
   --radius: 14px;
 }
 
@@ -280,6 +283,38 @@ html, body {
   align-self: center;
   flex-shrink: 0;
 }
+
+/* b20: золотое слово — одно на уровне, даёт +1 к запасу (main.js, GOLD_LEVELS).
+   Золото видно и когда чип текущий: заливка золотая, рамка глиняная. */
+.word-chip.gold {
+  background: var(--gold-tint);
+  border: 2px solid var(--gold);
+  color: var(--gold-ink);
+  font-weight: 700;
+}
+.word-chip.gold::before { content: '⚡'; margin-right: 3px; font-size: 12px; }
+.word-chip.gold.current { border-color: var(--accent2); }
+/* Перелёт ⚡ и «+1»: fixed, координаты ставит main.js; движение — в блоке motion ниже. */
+.energy-fly {
+  position: fixed; left: 0; top: 0; z-index: 60;
+  font-size: 18px; line-height: 1;
+  pointer-events: none;
+  will-change: transform;
+}
+.energy-fly[hidden] { display: none; }
+.energy-plus {
+  position: fixed; left: 0; top: 0; z-index: 60;
+  font-weight: 700; font-size: 15px; line-height: 1;
+  color: var(--gold-ink);
+  pointer-events: none;
+}
+.energy-plus[hidden] { display: none; }
+.energy-icon { display: inline-block; }
+/* b20: строка «следующее обновление» — на победе последнего уровня и в меню. */
+.win-more { margin: 0 0 12px; font-size: 14px; color: var(--accent2-ink); }
+.win-more[hidden] { display: none; }
+.menu-more { color: var(--accent2-ink); }
+.menu-more[hidden] { display: none; }
 
 /* Сетка. Размер задаётся из JS (Board.fit), клетки тянутся через 1fr. */
 .board {
@@ -634,6 +669,16 @@ html, body {
     100% { transform: scale(1); }
   }
   .word-chip.pop { animation: chip-pop 180ms ease; }
+
+  /* b20: перелёт ⚡ к счётчику (650 мс, растёт к концу), «+1» всплывает и тает,
+     значок в шапке пыхает по прибытии. */
+  .energy-fly { transition: transform 650ms ease-in; }
+  @keyframes plus-up {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-18px); }
+  }
+  .energy-plus.run { animation: plus-up 900ms ease-out forwards; }
+  .energy-icon.pulse { animation: chip-pop 240ms ease; }
 
   /* Плавный переход подсветки текущего звена. */
   .word-chip { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
