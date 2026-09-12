@@ -53,6 +53,25 @@ gameTitle: 'Словоход',
       streakLine:      'Серия: {n} {d} подряд',
       streakToastHints: '+{n} {hint} за {day}-й день подряд',
       hintBonusHint:   'Подсказка бесплатно',
+
+      /* b19 — календарь возвращений (гипотеза 1). Та же проверка «И ЧТО?
+         СКОЛЬКО?»: каждая строка называет число или конкретную веху. */
+      dailyTitle:      'День {n} из {total}',
+      dailyHints:      '+{n} {hint}',
+      dailyEnergy:     '+{n} {lv}',
+      dailyGold:       'золотая подсказка',
+      dailyAnd:        ' и ',
+      dailyClaim:      'Забрать',
+      dailyTomorrow:   'Завтра: {reward}',
+      dailyLine:       'День {n} из {total} · завтра {reward}',
+      dailyLinePending: 'День {n} из {total} · награда ждёт',
+      hintGold:        'Золотая подсказка: слово целиком',
+      // b19 — ролик у стены (гипотеза 2)
+      wallAd:          'Смотреть ролик: +{n} {lv}',
+      wallAdDone:      'Ролики на сегодня закончились. Пройденные уровни открыты всегда',
+      // b19 — обучение цепочке и подсказка порядка
+      tutorialChain:   'Слова идут цепочкой: последняя буква — первая буква следующего',
+      outOfOrder:      'Сначала {word}',
     },
     en: {
       loading: 'Loading…',
@@ -89,6 +108,21 @@ gameTitle: 'Словоход',
       streakLine:      'Streak: {n} of {d} days',
       streakToastHints: '+{n} hints for day {day} in a row',
       hintBonusHint:   'Free hint',
+
+      dailyTitle:      'Day {n} of {total}',
+      dailyHints:      '+{n} {hint}',
+      dailyEnergy:     '+{n} {lv}',
+      dailyGold:       'golden hint',
+      dailyAnd:        ' and ',
+      dailyClaim:      'Claim',
+      dailyTomorrow:   'Tomorrow: {reward}',
+      dailyLine:       'Day {n} of {total} · tomorrow {reward}',
+      dailyLinePending: 'Day {n} of {total} · reward waiting',
+      hintGold:        'Golden hint: whole word',
+      wallAd:          'Watch an ad: +{n} {lv}',
+      wallAdDone:      'No more ads today. Finished levels are always open',
+      tutorialChain:   'Words form a chain: the last letter starts the next word',
+      outOfOrder:      '{word} first',
     },
   };
 

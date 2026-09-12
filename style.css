@@ -510,6 +510,44 @@ html, body {
   .retention-toast { transition: none; }
 }
 
+/* ============================================================
+   b19 — КАЛЕНДАРЬ ВОЗВРАЩЕНИЙ. Ячейки — плитки в стиле поля: тот же
+   --surface/--tile-border, «получено» — зелёная как найденная клетка,
+   «сегодня» — глиняная рамка как текущее звено. Новых цветов нет.
+   7 ячеек по 32px + зазоры = 260px — влезает в карточку 320px с
+   полями 24px и в узкий экран 320px (карточка 86% = 275px).
+   ============================================================ */
+.cal-row {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin: 14px 0 12px;
+}
+.cal-cell {
+  width: 32px; height: 42px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: 8px;
+  color: var(--text-dim);
+}
+.cal-day { font-size: 10px; line-height: 1; }
+.cal-val { font-size: 12px; font-weight: 700; line-height: 1; color: var(--text); white-space: nowrap; }
+.cal-cell.is-done { background: #2e9e5b; border-color: #2e9e5b; color: rgba(255,255,255,0.8); }
+.cal-cell.is-done .cal-val { color: #fff; }
+.cal-cell.is-today { border: 2px solid var(--accent2); background: var(--accent2-tint); color: var(--accent2-ink); }
+.cal-cell.is-today .cal-val { color: var(--accent2-ink); }
+.daily-reward { margin: 0 0 14px; font-size: 22px; font-weight: 700; line-height: 1.25; }
+.daily-tomorrow { margin: 12px 0 0; font-size: 13px; color: var(--text-dim); }
+
+/* b19 — строка «осталось N новых уровней» на экране победы. */
+.win-energy { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); }
+.win-energy[hidden] { display: none; }
+
+/* b19 — второй шаг туториала: два чипа цепочки, как в списке слов. */
+.tut-chain { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0 0 8px; }
+
 /* Узкий экран (320px): строка запаса на игровом экране переносится под
    число, иначе многоточие съедает всё сообщение. */
 @media (max-width: 360px) {

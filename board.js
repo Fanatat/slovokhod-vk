@@ -243,5 +243,24 @@ window.Board = (function () {
     setTimeout(function () { el.classList.remove('nudge'); }, 1200);
   }
 
-  return { init: init, render: render, clear: clear, revealHint: revealHint, nudgeCurrent: nudgeCurrent };
+  // Золотая подсказка (b19, день 7 календаря): подсветить ВСЕ ещё не
+  // подсвеченные буквы целевого слова разом (та же янтарная рамка, что
+  // у revealHint). false — если слово не найдено в уровне или уже собрано.
+  function revealWord(targetWord) {
+    if (!current || !targetWord) return false;
+    var entry = null;
+    for (var i = 0; i < current.words.length; i++) {
+      if (current.words[i].word === targetWord) { entry = current.words[i]; break; }
+    }
+    if (!entry || found[entry.word]) return false;
+    var any = false;
+    for (var j = 0; j < entry.path.length; j++) {
+      var rc = entry.path[j];
+      var el = boardEl.querySelector('.cell[data-r="' + rc[0] + '"][data-c="' + rc[1] + '"]');
+      if (el && !el.classList.contains('hint')) { el.classList.add('hint'); any = true; }
+    }
+    return any;
+  }
+
+  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent };
 })();
