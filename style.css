@@ -18,6 +18,7 @@
   --gold: #d9a441;           /* золото — золотое слово (b20) */
   --gold-tint: #f8e9c3;      /* светлый тон под фон золотого чипа */
   --gold-ink: #7a5a12;       /* текст на золотом */
+  --banner-h: 0px;           /* b23: полоса под баннер площадки снизу, ставит main.js setBannerInset */
   --radius: 14px;
 }
 
@@ -67,6 +68,7 @@ html, body {
 .screen {
   position: absolute;
   inset: 0;
+  bottom: var(--banner-h, 0px);   /* b23: экраны заканчиваются выше баннера площадки */
   display: none;
   flex-direction: column;
   align-items: center;
@@ -179,7 +181,7 @@ html, body {
 #build-badge {
   position: fixed;
   left: max(6px, env(safe-area-inset-left));
-  bottom: max(3px, env(safe-area-inset-bottom));
+  bottom: calc(var(--banner-h, 0px) + max(3px, env(safe-area-inset-bottom)));
   margin: 0;
   color: var(--text-dim);
   font-family: monospace, monospace;
@@ -208,18 +210,20 @@ html, body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  padding: 0 0 max(24px, env(safe-area-inset-bottom));
+  padding: 0 0 max(14px, env(safe-area-inset-bottom));
 }
 
+/* b23: шапка и лента ниже (54 px, кнопки 40) — игровой экран компактнее
+   под постоянный баннер снизу (решение основателя 13.09). */
 .game-head {
   position: relative;
   flex: 0 0 auto;
-  height: 64px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  padding-top: max(12px, env(safe-area-inset-top));
+  padding-top: max(8px, env(safe-area-inset-top));
 }
 .game-head-center { flex: 1; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
 .game-level { font-size: 14px; font-weight: 600; }
@@ -227,11 +231,11 @@ html, body {
 .game-counter { color: var(--text); font-size: 15px; min-width: 48px; text-align: right; }
 
 .icon-btn {
-  width: 44px; height: 44px;
+  width: 40px; height: 40px;
   border: 1px solid var(--tile-border); border-radius: 50%;
   background: var(--surface);
   color: var(--text);
-  font-size: 26px; line-height: 1;
+  font-size: 24px; line-height: 1;
   cursor: pointer;
 }
 .icon-btn:active { transform: scale(0.96); }
@@ -244,16 +248,17 @@ html, body {
   position: relative;
   flex: 1 1 0;
   min-height: 0;
+  margin-top: auto;     /* b23: остаток высоты (когда поле упёрлось в потолок клетки) делится над полем и под кнопкой */
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 24px;
+  padding: 6px 16px;
 }
 
 /* Список слов уровня: над кнопкой подсказки. */
 .howto {
   flex: 0 0 auto;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   padding: 0 8px;
   text-align: center;
   color: var(--text-dim);
@@ -263,20 +268,20 @@ html, body {
 .word-list {
   flex: 0 0 auto;
   max-height: 34vh;         /* страховка для очень низких экранов: список прокручивается, поле не схлопывается */
-  margin: 0 0 8px;
-  padding: 4px 16px;
+  margin: 0 0 6px;
+  padding: 2px 12px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-content: flex-start;
-  gap: 6px;
+  gap: 5px;
   overflow-y: auto;
 }
 .word-chip {
   background: var(--surface);
   border: 1px solid var(--tile-border);
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 3px 9px;
   font-size: 14px;
   color: var(--text);
   letter-spacing: 0.03em;
@@ -344,18 +349,19 @@ html, body {
 /* Сетка. Размер задаётся из JS (Board.fit), клетки тянутся через 1fr. */
 .board {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
-/* Клетка-буква. Крупная тап-цель (п.1.8). */
+/* Клетка-буква. Крупная тап-цель (п.1.8); b23 — компактнее (радиус 8,
+   шрифт до 36, потолок размера клетки в Board.fit). */
 .cell {
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--surface);
   border: 1px solid var(--tile-border);
-  border-radius: 10px;
-  font-size: clamp(20px, 7vmin, 40px);
+  border-radius: 8px;
+  font-size: clamp(18px, 6.5vmin, 36px);
   font-weight: 600;
   aspect-ratio: 1 / 1;
 }
@@ -403,15 +409,16 @@ html, body {
   position: relative;
   flex: 0 0 auto;
   align-self: center;
+  margin-bottom: auto;   /* b23: вторая половина остатка — под кнопкой, подальше от баннера */
 }
 .hint-btn {
   border: 0;
   border-radius: var(--radius);
-  min-height: 48px;
-  padding: 0 20px;
+  min-height: 44px;
+  padding: 0 18px;
   background: var(--surface);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   border: 1px solid var(--tile-border);
@@ -468,28 +475,47 @@ html, body {
 /* На игровом экране строка идёт тонкой лентой под шапкой: одна строка,
    без переноса — вертикаль там нужна полю, а не тексту. */
 .energy-row-game {
+  position: relative;          /* b23: якорь для попапа .energy-pop */
   flex: 0 0 auto;
   margin: 0 0 2px;
-  padding: 0 14px;
+  padding: 0 12px;
   max-width: none;
   flex-wrap: nowrap;
   justify-content: flex-start;
+  align-items: center;
   gap: 8px;
   font-size: 13px;
 }
 .energy-row-game .energy-value { font-size: 14px; }
-/* b22: строка «Хватит на … · +10 в …» стоит РЯДОМ со счётчиком и цветом
-   чернил, не приглушённая — на десктопном ВК (окно ~1000 px) прижатая к
-   правому краю и серая она терялась (скриншот основателя 13.09). */
-.energy-row-game .energy-line {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  color: var(--text);
+/* b23 (решение основателя 13.09): на игровом экране строка «Хватит на … ·
+   +10 в …» не помещалась на телефоне и занимала высоту — теперь она
+   спрятана за «?» рядом со счётчиком и открывается всплывающей карточкой
+   (main.js setEnergyPop; плавность — в блоке motion). */
+.energy-help {
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--tile-border); border-radius: 50%;
+  background: var(--surface); color: var(--text-dim);
+  font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1;
+  cursor: pointer; flex-shrink: 0;
 }
+.energy-help[aria-expanded="true"] { background: var(--accent2-tint); border-color: var(--accent2); color: var(--accent2-ink); }
+.energy-pop {
+  position: absolute;
+  left: 12px; top: calc(100% + 6px);
+  z-index: 30;
+  width: min(calc(100% - 24px), 340px);
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 22px rgba(43,39,35,0.16);
+  visibility: hidden; opacity: 0; transform: translateY(-4px);
+}
+.energy-pop.open { visibility: visible; opacity: 1; transform: none; }
+.energy-pop p { margin: 0; font-size: 13px; line-height: 1.35; white-space: normal; }
+.energy-pop .energy-line { color: var(--text); font-weight: 600; }
+.energy-pop .energy-rule { color: var(--text-dim); margin-top: 4px; }
 
 .streak-line {
   margin: -8px 0 18px;
@@ -613,8 +639,6 @@ html, body {
 /* Узкий экран (320px): строка запаса на игровом экране переносится под
    число, иначе многоточие съедает всё сообщение. */
 @media (max-width: 360px) {
-  .energy-row-game { flex-wrap: wrap; }
-  .energy-row-game .energy-line { flex: 1 1 100%; text-align: left; }
   .wall-title { font-size: 19px; }
 }
 
@@ -729,6 +753,11 @@ html, body {
   .energy-icon.pulse { animation: energy-hit 480ms ease-out; }
   .energy-value { transition: color 600ms ease; }
   .energy-value.hit { color: var(--gold-ink); transition: color 0s; }
+
+  /* b23: попап «?» проявляется и чуть съезжает вниз, скрытие — тем же ходом
+     (visibility задерживается до конца, иначе исчезнет рывком). */
+  .energy-pop { transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms; }
+  .energy-pop.open { transition: opacity 180ms ease, transform 180ms ease, visibility 0s; }
 
   /* Плавный переход подсветки текущего звена; transform/box-shadow —
      посадка чипа после фазы 1 золотого слова. */

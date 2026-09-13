@@ -55,12 +55,17 @@ window.Board = (function () {
     fit();
   }
 
+  var MAX_CELL_PX = 60;   // b23: клетка не крупнее 60 px
+
   function fit() {
     if (!current || !wrapEl) return;
     // b22: обёртка — flex-ребёнок с внутренними отступами (style.css
     // .board-wrap); поле обязано умещаться в её КОНТЕНТНУЮ область,
     // иначе выезжало бы на ленту запаса и список слов.
     var padX = 0, padY = 0;
+    // b23: снимаем прошлый потолок обёртки, чтобы измерить всё доступное
+    // место (иначе после уменьшения окна обёртка не смогла бы вырасти).
+    wrapEl.style.maxHeight = '';
     if (typeof getComputedStyle === 'function') {
       var cs = getComputedStyle(wrapEl);
       padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
@@ -73,9 +78,21 @@ window.Board = (function () {
     // считался до пропорции, и на 360px поле теряло ~50px высоты зря.
     var ratio = current.cols / current.rows;
     var h = Math.min(maxH, maxW / ratio);
+    // b23: потолок размера клетки — на высоких экранах поле не раздувается,
+    // цепочка и кнопка стоят выше (компактнее под баннер, решение 13.09).
+    var gap = 5;
+    if (typeof getComputedStyle === 'function') {
+      var g = parseFloat(getComputedStyle(boardEl).rowGap);
+      if (!isNaN(g)) gap = g;
+    }
+    h = Math.min(h, current.rows * MAX_CELL_PX + (current.rows - 1) * gap);
     var w = h * ratio;
     boardEl.style.width = Math.floor(w) + 'px';
     boardEl.style.height = Math.floor(h) + 'px';
+    // b23: обёртка не выше поля — цепочка слов и кнопка встают сразу под
+    // полем, а не у самого низа экрана (решение основателя 13.09: «сетку
+    // слов чуть выше»); свободное место остаётся внизу, под баннером.
+    wrapEl.style.maxHeight = (Math.floor(h) + padY) + 'px';
   }
 
   function clear() {
@@ -274,5 +291,6 @@ window.Board = (function () {
     return any;
   }
 
-  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent };
+  // fit — наружу: main.js пересчитывает поле, когда меняется полоса под баннер (b23).
+  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent, fit: fit };
 })();

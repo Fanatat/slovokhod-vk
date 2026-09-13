@@ -49,6 +49,9 @@ gameTitle: 'Словоход',
       energyWallSub:   'А пройденные открыты всегда: возвращайся за рекордом',
       energyWallBack:  'В меню',
       energyToastGain: '+{n} — можно играть дальше',
+      // b23: попап «?» на игровом экране — правило начисления по часам.
+      energyHelp:      'Про запас',
+      energyRule:      'По +{gain} ⚡ каждые 4 часа — в 00:00, 04:00, 08:00, 12:00, 16:00 и 20:00. Запас не больше {cap}.',
       // Серия входов — отдельная шкала (награды идут в подсказки, не в
       // запас). Смешивать шкалы запрещено: обменов и конвертаций нет.
       streakLine:      'Серия: {n} {d} подряд',
@@ -109,6 +112,8 @@ gameTitle: 'Словоход',
       energyWallSub:   'Finished levels are always open: come back for a better score',
       energyWallBack:  'Menu',
       energyToastGain: '+{n} — keep playing',
+      energyHelp:      'About energy',
+      energyRule:      '+{gain} ⚡ every 4 hours — at 00:00, 04:00, 08:00, 12:00, 16:00 and 20:00. Up to {cap}.',
       streakLine:      'Streak: {n} of {d} days',
       streakToastHints: '+{n} hints for day {day} in a row',
       hintBonusHint:   'Free hint',

@@ -19,7 +19,7 @@
        бы полусобранную версию (шрам ТЗ №19 Color Sort).
        Вне билда плейсхолдер остаётся как есть — это нормально, значит
        билд не собирался через build.py. -->
-  <link rel="stylesheet" href="style.css?v=22" />
+  <link rel="stylesheet" href="style.css?v=23" />
 
   <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
        Вне билда (локальная разработка) маркер НЕ заменяется:
@@ -29,7 +29,7 @@
   <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
        window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
        заменяется: main.js покажет плашку "dev" вместо номера. -->
-  <script>window.BUILD = 'vk-b22-89f42b9-20260913';</script>
+  <script>window.BUILD = 'vk-b23-c0aa88f-20260913';</script>
 </head>
 <body>
   <div id="app">
@@ -116,7 +116,14 @@
       <div class="energy-row energy-row-game">
         <span class="energy-icon" aria-hidden="true">⚡</span>
         <span class="energy-value"><span class="energy-now">–</span>&#8202;/&#8202;<span class="energy-cap">–</span></span>
-        <span class="energy-line"></span>
+        <!-- b23 (решение основателя 13.09): пояснение к запасу спрятано за «?» —
+             всплывающая карточка (main.js setEnergyPop). Тексты ставит
+             renderEnergy по классам .energy-line / .energy-rule. -->
+        <button id="btn-energy-help" class="energy-help" type="button" aria-label="Про запас" aria-expanded="false" title="Про запас">?</button>
+        <div id="energy-pop" class="energy-pop" role="dialog" aria-label="Запас">
+          <p class="energy-line"></p>
+          <p class="energy-rule"></p>
+        </div>
       </div>
       <!-- b20: перелёт значка запаса от золотого слова к счётчику и всплывающий «+1»
            (position: fixed, координаты ставит main.js по getBoundingClientRect) -->
@@ -217,12 +224,12 @@
        текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
   <div id="build-badge" aria-hidden="true"></div>
 
-  <script src="i18n.js?v=22"></script>
-  <script src="platform.js?v=22"></script>
-  <script src="levels.js?v=22"></script>
-  <script src="board.js?v=22"></script>
-  <script src="sound.js?v=22"></script>
-  <script src="retention.js?v=22"></script>
-  <script src="main.js?v=22"></script>
+  <script src="i18n.js?v=23"></script>
+  <script src="platform.js?v=23"></script>
+  <script src="levels.js?v=23"></script>
+  <script src="board.js?v=23"></script>
+  <script src="sound.js?v=23"></script>
+  <script src="retention.js?v=23"></script>
+  <script src="main.js?v=23"></script>
 </body>
 </html>

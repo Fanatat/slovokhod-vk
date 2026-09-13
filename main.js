@@ -34,6 +34,8 @@
   var btnTutorialOk = document.getElementById('btn-tutorial-ok');
   var elWordList = document.getElementById('word-list');
   var elHowto = document.getElementById('howto');
+  var btnEnergyHelp = document.getElementById('btn-energy-help');   // b23: «?» у запаса
+  var elEnergyPop = document.getElementById('energy-pop');          // b23: попап с пояснением
   var elLevels = document.getElementById('levels');
   var levelsGrid = document.getElementById('levels-grid');
   var btnLevels = document.getElementById('btn-levels');
@@ -84,7 +86,7 @@
     // тратимая валюта (уровни в сетке по-прежнему открывает только
     // прогресс, maxUnlocked). Числа ТЗ: потолок 15, +10 за такт 6 часов.
     gateMode:       'energy',
-    tickMs:         6 * 60 * 60 * 1000,
+    tickMs:         4 * 60 * 60 * 1000,
     dripPerTick:    10,
     accumulatorCap: 15,
     /* РЕИНКАРНАЦИЯ b19 (2026-09-12, гипотеза 1 «Календарь возвращений»,
@@ -384,6 +386,54 @@
     else if (cur > 0) line = I18N.fill('energyLineHave', vars);
     else line = I18N.fill('energyLineEmpty', vars);
     setAllText('.energy-line', line);
+    setAllText('.energy-rule', I18N.fill('energyRule', vars));   // b23: попап «?»
+  }
+
+  /* b23: «?» у счётчика — всплывающая карточка с пояснением (index.html
+     #energy-pop). Закрывается тапом вне карточки, повторным тапом по «?»,
+     Escape и при смене экрана (showScreen). В тестовом шиме элементов
+     может не быть — все обращения под проверкой. */
+  function setEnergyPop(open) {
+    if (!elEnergyPop) return;
+    if (open) elEnergyPop.classList.add('open'); else elEnergyPop.classList.remove('open');
+    if (btnEnergyHelp && typeof btnEnergyHelp.setAttribute === 'function') {
+      btnEnergyHelp.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+  function energyPopOpen() { return !!(elEnergyPop && elEnergyPop.classList.contains('open')); }
+  if (btnEnergyHelp) {
+    btnEnergyHelp.addEventListener('click', function (e) {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+      setEnergyPop(!energyPopOpen());
+    });
+  }
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('pointerdown', function (e) {
+      if (!energyPopOpen()) return;
+      var t = e && e.target;
+      if (t === btnEnergyHelp) return;
+      if (elEnergyPop && typeof elEnergyPop.contains === 'function' && elEnergyPop.contains(t)) return;
+      setEnergyPop(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e && e.key === 'Escape') setEnergyPop(false);
+    });
+  }
+
+  /* b23: полоса под баннер площадки (решение основателя 13.09: баннер
+     снизу на постоянной основе). Адаптер сообщает, сколько пикселей
+     баннер перекрывает снизу: ВК с layout_type:'resize' — 0 (клиент сам
+     ужимает окно мини-аппа), Яндекс sticky — высота баннера. Экраны
+     заканчиваются выше на эту величину (CSS --banner-h), поле
+     пересчитывается. */
+  function setBannerInset(px) {
+    var v = (typeof px === 'number' && px > 0) ? Math.round(px) : 0;
+    var rootEl = document.documentElement;
+    if (rootEl && rootEl.style && typeof rootEl.style.setProperty === 'function') {
+      rootEl.style.setProperty('--banner-h', v + 'px');
+    }
+    console.log('[platform] полоса под баннер снизу: ' + v + 'px');
+    if (typeof Board !== 'undefined' && typeof Board.fit === 'function') Board.fit();
   }
 
   function setAllText(selector, text) {
@@ -681,6 +731,46 @@
     }));
   }
 
+  /* b23 (решение основателя 13.09): такт не «через 4 ч после захода», а
+     ПО ЧАСАМ — в 00:00, 04:00, 08:00, 12:00, 16:00 и 20:00 местного
+     времени игрока, у всех одинаково и кругло. Модуль retention.js (общий с
+     Color Sort, его не трогаем) считает такты от штампа lastTickAt;
+     выравниваем штамп ВНИЗ на ближайшую границу слота до и после каждого
+     applyDripTick — тогда «через tickMs от штампа» и есть следующая круглая
+     граница. Модуль сам сдвигает штамп в «сейчас» при полном запасе и при
+     откате часов — выравнивание возвращает его на границу. Сейв b22
+     (штамп «когда зашёл») мигрирует тем же путём: выровненный штамп ≤
+     старого, начисление придёт не позже прежнего. */
+  var DRIP_SLOT_HOURS = 4;
+  function slotFloorMs(ms) {
+    var d = new Date(ms);
+    var h = d.getHours();
+    d.setHours(h - (h % DRIP_SLOT_HOURS), 0, 0, 0);
+    return d.getTime();
+  }
+  function alignTickAnchor(state) {
+    if (!state || typeof state.lastTickAt !== 'number') return state;
+    var aligned = slotFloorMs(state.lastTickAt);
+    if (aligned === state.lastTickAt) return state;
+    return {
+      dripOpened: state.dripOpened,
+      lastTickAt: aligned,
+      lastEntryDay: state.lastEntryDay,
+      streakLen: state.streakLen,
+      streakRewards: state.streakRewards,
+    };
+  }
+  function dripTick(prev, nowMs) {
+    var next = alignTickAnchor(Retention.applyDripTick(alignTickAnchor(prev), nowMs, RETENTION_CONFIG));
+    // Тот же штамп и запас — состояние не менялось: возвращаем prev, чтобы
+    // retentionTick не писал сейв каждые 30 с (раньше при полном запасе
+    // штамп «сейчас» менялся на каждом такте таймера).
+    if (next !== prev && next.dripOpened === prev.dripOpened && next.lastTickAt === prev.lastTickAt &&
+        next.lastEntryDay === prev.lastEntryDay && next.streakLen === prev.streakLen &&
+        next.streakRewards === prev.streakRewards) return prev;
+    return next;
+  }
+
   /* Такт раздатчика. Вызывается по таймеру и в точках возврата в меню.
      ВАЖНО: сохраняем при ЛЮБОМ изменении состояния, а не только при
      начислении — applyDripTick подтягивает штамп ещё в двух случаях
@@ -693,7 +783,7 @@
     var before = prev.dripOpened;
     var nowMs = Platform.now();
     var rolledBack = nowMs < prev.lastTickAt;
-    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    retentionState = dripTick(prev, nowMs);   // b23: такт по часам
     // Перерисовываем ВСЕГДА: строка может нести обратный отсчёт, и он
     // обязан идти, даже когда состояние модуля не менялось. Запись в
     // сейв — только при реальном изменении, рендер записи не требует.
@@ -708,10 +798,10 @@
       showRetentionToast(I18N.fill('energyToastGain', { n: granted }));
       continuePendingIfPossible();
     } else if (rolledBack) {
-      console.log('[retention] часы устройства ушли НАЗАД: начисления нет, штамп подтянут к «сейчас» — ' +
+      console.log('[retention] часы устройства ушли НАЗАД: начисления нет, штамп подтянут к границе слота ≤ «сейчас» — ' +
         'иначе следующий такт наступил бы только когда реальное время догонит старый штамп');
     } else {
-      console.log('[retention] запас на потолке: начисления нет, штамп подтянут к «сейчас» — ' +
+      console.log('[retention] запас на потолке: начисления нет, штамп подтянут к границе слота ≤ «сейчас» — ' +
         'простой не банкуется в тени');
     }
   }
@@ -805,9 +895,9 @@
       ? data.gw.filter(function (n) { return typeof n === 'number'; })
       : [];
 
-    // Такт за время, пока игра была закрыта.
+    // Такт за время, пока игра была закрыта (b23: по часам, см. dripTick).
     var prev = retentionState;
-    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    retentionState = dripTick(prev, nowMs);
     var granted = retentionState.dripOpened - prev.dripOpened;
     if (granted > 0) {
       console.log('[retention] за время без игры набежало +' + granted +
@@ -866,6 +956,7 @@
   }
 
   function showScreen(el) {
+    setEnergyPop(false);   // b23: попап «?» живёт только на игровом экране
     var screens = document.querySelectorAll('.screen');
     for (var s = 0; s < screens.length; s++) screens[s].classList.remove('is-active');
     el.classList.add('is-active');
@@ -1167,7 +1258,7 @@
       // Стики-баннер (задача Б): гарантированная рекламная поверхность,
       // не зависящая от гейта interstitial/rewarded. No-op на площадках
       // без поддержки — метод обязан существовать в контракте у всех.
-      Platform.showBanner();
+      Platform.showBanner(function (insetPx) { setBannerInset(insetPx); });   // b23: полоса под баннер
 
       // Прогресс грузим параллельно, чтобы не задерживать Game Ready.
       Platform.load().then(function (data) {
