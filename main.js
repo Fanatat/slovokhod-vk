@@ -23,12 +23,19 @@
   var elWinScore = document.getElementById('win-score');
   var elWinBest  = document.getElementById('win-best');
   var elWinNew   = document.getElementById('win-new');
+  var elWinEnergy = document.getElementById('win-energy'); // b19: «осталось N новых уровней»
+  var elWinMore = document.getElementById('win-more');     // b20: после последнего уровня
+  var elMenuMore = document.getElementById('menu-more');   // b20: та же строка в меню
+  var elEnergyFly = document.getElementById('energy-fly'); // b20: перелёт ⚡ к счётчику
+  var elEnergyPlus = document.getElementById('energy-plus');
   var btnNext = document.getElementById('btn-next');
   var btnHint = document.getElementById('btn-hint');
   var elTutorial = document.getElementById('tutorial');
   var btnTutorialOk = document.getElementById('btn-tutorial-ok');
   var elWordList = document.getElementById('word-list');
   var elHowto = document.getElementById('howto');
+  var btnEnergyHelp = document.getElementById('btn-energy-help');   // b23: «?» у запаса
+  var elEnergyPop = document.getElementById('energy-pop');          // b23: попап с пояснением
   var elLevels = document.getElementById('levels');
   var levelsGrid = document.getElementById('levels-grid');
   var btnLevels = document.getElementById('btn-levels');
@@ -79,17 +86,17 @@
     // тратимая валюта (уровни в сетке по-прежнему открывает только
     // прогресс, maxUnlocked). Числа ТЗ: потолок 15, +10 за такт 6 часов.
     gateMode:       'energy',
-    tickMs:         6 * 60 * 60 * 1000,
+    tickMs:         4 * 60 * 60 * 1000,
     dripPerTick:    10,
     accumulatorCap: 15,
-    streakThreshold: 3,
-    // Обе награды серии идут в ПОДСКАЗКИ (в Color Sort 3-й день дарил
-    // косметику — в Словоходе витрины нет вовсе, дарить нечего).
-    streakDayReward:  { 2: 'hints', 3: 'hints' },
-    // Своё поле конфига: модуль возвращает ТИП награды, количество —
-    // забота игры (mergeConfig прокидывает незнакомые ключи как есть,
-    // правки модуля для этого не потребовалось).
-    streakHintsByDay: { 2: 2, 3: 5 },
+    /* РЕИНКАРНАЦИЯ b19 (2026-09-12, гипотеза 1 «Календарь возвращений»,
+       см. 03_РЕИНКАРНАЦИЯ_Словоход_стратегия.md §4). Награды по дням
+       считает КАЛЕНДАРЬ в main.js (DAILY_REWARDS ниже), модулю оставлен
+       только счёт дней серии. Награды модуля по дням 2/3 выключены ЯВНО
+       (null): mergeConfig иначе подмешал бы дефолты Color Sort
+       {2:'hints', 3:'style'}. Порог серии 7 — длина календаря. */
+    streakThreshold: 7,
+    streakDayReward:  { 2: null, 3: null },
     callbacks: {
       totalLevels:     function ()  { return Levels.count(); },
       // «Пройден» в Словоходе = индекс меньше maxUnlocked: завершение
@@ -109,6 +116,61 @@
   var bonusHints = 0;          // ВТОРАЯ шкала: бесплатные подсказки
   var pendingOpenIndex = null; // куда шёл игрок, когда упёрся в стену
   var retentionTimer = null;
+
+  /* ============================================================
+     КАЛЕНДАРЬ ВОЗВРАЩЕНИЙ (b19, гипотеза 1). Семь дней по кругу; день
+     календаря = длина серии модуля + calOffset (см. bootRetention: после
+     пропуска модуль считает серию с 0, а календарь обязан показать
+     «День 1» с наградой — иначе вернувшийся после перерыва игрок
+     получает «ничего»). Награда выдаётся ПО КНОПКЕ «Забрать» — ритуал
+     входа и есть механика; незабранная награда переживает закрытие
+     вкладки (dailyPending в сейве) и показывается снова в тот же день.
+     Числа шкалы — решение LGD 2026-09-12, ждёт подтверждения основателя
+     (test_retention.js [0] сверяет их с этим решением).
+     ============================================================ */
+  var DAILY_DAYS = 7;
+  var DAILY_REWARDS = {
+    1: { hints: 1 },
+    2: { hints: 2 },
+    3: { energy: 5 },
+    4: { hints: 3 },
+    5: { energy: 5 },
+    6: { hints: 5 },
+    7: { energy: 10, gold: 1 },
+  };
+  var calOffset = 0;      // 0/1 — сдвиг дня календаря относительно серии модуля
+  var dailyPending = 0;   // день, награда за который показана, но не забрана (0 — нет)
+  var goldHints = 0;      // ТРЕТЬЯ шкала: золотые подсказки (открывают слово целиком)
+
+  /* Ролик у стены (b19, гипотеза 2): +WALL_AD_ENERGY запаса за rewarded,
+     не выше потолка (Retention.grantDrip), не более WALL_ADS_PER_DAY раз
+     в календарный день — счётчик в сейве (wa). Паттерн перенесён из
+     Color Sort (main.js:1266-1290, onEnergyWallAdClick). */
+  var WALL_AD_ENERGY = 5;
+  var WALL_ADS_PER_DAY = 3;
+  var wallAds = { d: '', n: 0 };
+  // Экран победы предупреждает о близкой стене, когда запаса осталось мало.
+  var WIN_ENERGY_WARN = 3;
+
+  /* ---------- Золотое слово (b20, решение основателя 12.09) ----------
+     На десяти уровнях из первых пятнадцати одно слово цепочки — золотое:
+     найденное ВПЕРВЫЕ, оно даёт +1 к запасу мимо потолка (как награда
+     календаря) с перелётом значка ⚡ к счётчику и всплывающим «+1».
+     Разово на уровень: номера забранных уровней — в сейве (gw); рестарт
+     и повтор чип не золотят, абузить нечего. Цель — азарт и первая сессия
+     без стены и без принудительной рекламы (см. adLevelGate ниже). */
+  var GOLD_LEVELS = [1, 2, 4, 5, 7, 9, 10, 11, 13, 15];
+  var GOLD_BURST_MS = 420; // b22: фаза 1 — чип разрастается (CSS gold-burst), потом перелёт ⚡
+  var goldClaimed = [];   // номера уровней (1-based), где золотое слово уже забрано
+
+  function goldWordFor(index, level) {
+    if (GOLD_LEVELS.indexOf(index + 1) === -1) return null;
+    if (goldClaimed.indexOf(index + 1) !== -1) return null;
+    if (!level.chain || !level.chain.length) return null;
+    // Среднее слово цепочки: награда приходит в середине уровня, а не под
+    // оверлеем победы, который через 450 мс закрыл бы анимацию.
+    return level.chain[Math.floor(level.chain.length / 2)];
+  }
 
   // Гейт частоты interstitial (задача Б, п.4.7): каждый N-й уровень И не
   // чаще раза в T мс — оба условия обязательны. Гейт живёт в памяти
@@ -136,8 +198,23 @@
   // ограничивает только НЕПРОШЕНУЮ рекламу. Запрошенный игроком ролик
   // (кнопка подсказки) показывается каждый раз — обработчик btnHint
   // ниже гейт не читает и счётчики не двигает.
-  var AD_LEVEL_GATE = 5;
-  var AD_MIN_INTERVAL_MS = 240000;
+  //
+  // b20 (решение основателя 12.09): первые AD_FREE_LEVELS уровней — без
+  // принудительной рекламы вовсе (игрок проходит их в своём темпе, это
+  // ~10 минут); дальше порог «уровней с последнего показа» зависит от
+  // номера пройденного уровня: до 30-го — каждый 3-й, до 80-го — каждый
+  // 4-й, дальше — каждый 5-й. Кулдаун 240000 → 60000 мс: при уровне в
+  // 30–40 с «каждый 3-й» — это раз в 90–120 с, и старый кулдаун молча
+  // вернул бы «раз в 6–8 уровней» (расписание заменяет Р-СЛ7); 60 с
+  // остаются страховкой от двойного показа на быстрых повторах.
+  var AD_FREE_LEVELS = 15;
+  function adLevelGate(levelNo) {
+    if (levelNo <= AD_FREE_LEVELS) return 0;   // 0 — рекламы нет
+    if (levelNo <= 30) return 3;
+    if (levelNo <= 80) return 4;
+    return 5;
+  }
+  var AD_MIN_INTERVAL_MS = 60000;
   var levelsSinceAd = 0;
   var lastAdShownAt = 0;
 
@@ -180,6 +257,14 @@
     if (retentionState && typeof Retention !== 'undefined') {
       fullState.r = Retention.encodeState(retentionState);
       fullState.bh = bonusHints;
+      // b19: календарь и ролик у стены — те же короткие ключи, тот же
+      // сторож объёма ниже (+~40 байт). Билд b18 эти ключи игнорирует:
+      // откат безопасен для прогресса, теряется только календарь.
+      fullState.co = calOffset;
+      fullState.dp = dailyPending;
+      fullState.gh = goldHints;
+      fullState.wa = wallAds;
+      fullState.gw = goldClaimed;   // b20: забранные золотые слова (номера уровней)
     }
 
     /* ---------- Пропуск повторной записи (ЭТАП 5, добор п.1) ----------
@@ -301,6 +386,54 @@
     else if (cur > 0) line = I18N.fill('energyLineHave', vars);
     else line = I18N.fill('energyLineEmpty', vars);
     setAllText('.energy-line', line);
+    setAllText('.energy-rule', I18N.fill('energyRule', vars));   // b23: попап «?»
+  }
+
+  /* b23: «?» у счётчика — всплывающая карточка с пояснением (index.html
+     #energy-pop). Закрывается тапом вне карточки, повторным тапом по «?»,
+     Escape и при смене экрана (showScreen). В тестовом шиме элементов
+     может не быть — все обращения под проверкой. */
+  function setEnergyPop(open) {
+    if (!elEnergyPop) return;
+    if (open) elEnergyPop.classList.add('open'); else elEnergyPop.classList.remove('open');
+    if (btnEnergyHelp && typeof btnEnergyHelp.setAttribute === 'function') {
+      btnEnergyHelp.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+  function energyPopOpen() { return !!(elEnergyPop && elEnergyPop.classList.contains('open')); }
+  if (btnEnergyHelp) {
+    btnEnergyHelp.addEventListener('click', function (e) {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+      setEnergyPop(!energyPopOpen());
+    });
+  }
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('pointerdown', function (e) {
+      if (!energyPopOpen()) return;
+      var t = e && e.target;
+      if (t === btnEnergyHelp) return;
+      if (elEnergyPop && typeof elEnergyPop.contains === 'function' && elEnergyPop.contains(t)) return;
+      setEnergyPop(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e && e.key === 'Escape') setEnergyPop(false);
+    });
+  }
+
+  /* b23: полоса под баннер площадки (решение основателя 13.09: баннер
+     снизу на постоянной основе). Адаптер сообщает, сколько пикселей
+     баннер перекрывает снизу: ВК с layout_type:'resize' — 0 (клиент сам
+     ужимает окно мини-аппа), Яндекс sticky — высота баннера. Экраны
+     заканчиваются выше на эту величину (CSS --banner-h), поле
+     пересчитывается. */
+  function setBannerInset(px) {
+    var v = (typeof px === 'number' && px > 0) ? Math.round(px) : 0;
+    var rootEl = document.documentElement;
+    if (rootEl && rootEl.style && typeof rootEl.style.setProperty === 'function') {
+      rootEl.style.setProperty('--banner-h', v + 'px');
+    }
+    console.log('[platform] полоса под баннер снизу: ' + v + 'px');
+    if (typeof Board !== 'undefined' && typeof Board.fit === 'function') Board.fit();
   }
 
   function setAllText(selector, text) {
@@ -308,12 +441,259 @@
     for (var i = 0; i < nodes.length; i++) nodes[i].textContent = text;
   }
 
-  function renderStreakLine() {
+  /* ---------- Календарь возвращений (b19) ---------- */
+  var elDaily      = document.getElementById('daily');
+  var dailyTitle   = document.getElementById('daily-title');
+  var dailyCells   = document.getElementById('daily-cells');
+  var dailyReward  = document.getElementById('daily-reward');
+  var dailyTomorrow = document.getElementById('daily-tomorrow');
+  var btnDailyClaim = document.getElementById('btn-daily-claim');
+
+  function calendarDay(n) { return ((n - 1) % DAILY_DAYS) + 1; }
+
+  // День календаря по текущему состоянию модуля (для строки меню).
+  function currentCalendarDay() {
+    if (!retentionState) return 1;
+    return calendarDay(Math.max(1, retentionState.streakLen + calOffset));
+  }
+
+  // Текст награды дня: «+2 подсказки», «+5 новых уровней»,
+  // «+10 новых уровней и золотая подсказка».
+  function dailyRewardText(day) {
+    var rw = DAILY_REWARDS[day] || {};
+    var parts = [];
+    if (rw.energy) parts.push(I18N.fill('dailyEnergy', { n: rw.energy, lv: I18N.plural(rw.energy, LV_FORMS) }));
+    if (rw.hints)  parts.push(I18N.fill('dailyHints',  { n: rw.hints,  hint: I18N.plural(rw.hints, HINT_FORMS) }));
+    if (rw.gold)   parts.push(I18N.t('dailyGold'));
+    return parts.join(I18N.t('dailyAnd'));
+  }
+
+  // Короткая подпись ячейки календаря: «+1», «⚡5», «★».
+  function dailyCellText(day) {
+    var rw = DAILY_REWARDS[day] || {};
+    if (rw.gold) return '★';
+    if (rw.energy) return '⚡' + rw.energy;
+    return '+' + (rw.hints || 0);
+  }
+
+  // Строка в меню: обещание на завтра — видно при каждом выходе в меню.
+  function renderDailyLine() {
     if (!streakLine || !retentionState) return;
-    var shown = Math.min(retentionState.streakLen, RETENTION_CONFIG.streakThreshold);
-    streakLine.textContent = I18N.fill('streakLine', {
-      n: shown, d: I18N.plural(shown, DAY_FORMS),
+    var day = currentCalendarDay();
+    if (dailyPending > 0) {
+      streakLine.textContent = I18N.fill('dailyLinePending', { n: day, total: DAILY_DAYS });
+    } else {
+      streakLine.textContent = I18N.fill('dailyLine', {
+        n: day, total: DAILY_DAYS, reward: dailyRewardText(calendarDay(day + 1)),
+      });
+    }
+  }
+
+  function showDaily(day) {
+    if (!elDaily) return;
+    if (dailyTitle) dailyTitle.textContent = I18N.fill('dailyTitle', { n: day, total: DAILY_DAYS });
+    if (dailyCells) {
+      dailyCells.innerHTML = '';
+      for (var d = 1; d <= DAILY_DAYS; d++) {
+        var cell = document.createElement('div');
+        cell.className = 'cal-cell' + (d < day ? ' is-done' : (d === day ? ' is-today' : ''));
+        var num = document.createElement('span');
+        num.className = 'cal-day';
+        num.textContent = String(d);
+        var val = document.createElement('span');
+        val.className = 'cal-val';
+        val.textContent = dailyCellText(d);
+        cell.appendChild(num);
+        cell.appendChild(val);
+        dailyCells.appendChild(cell);
+      }
+    }
+    if (dailyReward) dailyReward.textContent = dailyRewardText(day);
+    if (dailyTomorrow) dailyTomorrow.textContent = I18N.fill('dailyTomorrow', { reward: dailyRewardText(calendarDay(day + 1)) });
+    elDaily.hidden = false;
+  }
+
+  function claimDaily() {
+    if (elDaily) elDaily.hidden = true;
+    if (!dailyPending) return;
+    var day = dailyPending;
+    var rw = DAILY_REWARDS[day] || {};
+    dailyPending = 0;
+    if (rw.energy) grantEnergyBonus(rw.energy, day);
+    if (rw.hints)  grantBonusHints(rw.hints, day);
+    if (rw.gold) {
+      goldHints += rw.gold;
+      console.log('[calendar] день ' + day + ': +' + rw.gold + ' золотая подсказка, стало ' + goldHints);
+      updateHintLabel();
+    }
+    persistProgress();
+    renderDailyLine();
+    console.log('[calendar] день ' + day + ' из ' + DAILY_DAYS + ' забран: ' + dailyRewardText(day));
+  }
+
+  /* Запас в подарок (календарь). Потолок НЕ применяется намеренно:
+     обещанное «+5 новых уровней» обязано прийти и при полном запасе,
+     иначе награда дня превращается в ноль ровно у тех, кто играет
+     реже всех. Модуль это переживает: applyDripTick при backlog ≥ cap
+     только подтягивает штамп, spendEnergy списывает штатно, UI покажет
+     «20 / 15». Объект состояния собирается той же формой, что в
+     retention.js (пять полей) — energyPlusRaw ниже единственная функция
+     в игре, которая делает это мимо модуля; её зовут награда календаря
+     и золотое слово (b20). */
+  function energyPlusRaw(n) {
+    retentionState = {
+      dripOpened: retentionState.dripOpened + n,
+      lastTickAt: retentionState.lastTickAt,
+      lastEntryDay: retentionState.lastEntryDay,
+      streakLen: retentionState.streakLen,
+      streakRewards: retentionState.streakRewards,
+    };
+  }
+  function grantEnergyBonus(n, day) {
+    if (!retentionState) return;
+    energyPlusRaw(n);
+    console.log('[calendar] день ' + day + ': +' + n + ' к запасу, стало ' + retentionState.dripOpened);
+    persistProgress();
+    renderEnergy();
+    showRetentionToast(I18N.fill('energyToastGain', { n: n }));
+  }
+
+  /* Золотое слово найдено (b20): +1 мимо потолка, запись в сейв, перелёт ⚡. */
+  function claimGoldWord(index, chip) {
+    if (!retentionState) return;
+    goldClaimed.push(index + 1);
+    energyPlusRaw(1);
+    console.log('[gold] уровень ' + (index + 1) + ': золотое слово найдено, +1 к запасу, стало ' +
+      retentionState.dripOpened);
+    persist({ level: index, max: maxUnlocked, records: records });
+    if (typeof Sound.gold === 'function') Sound.gold();
+    // b22 (решение основателя 13.09): две фазы — сначала чип внизу
+    // разрастается на месте, и только потом ⚡ отделяется и летит к счётчику.
+    burstChip(chip, function () {
+      if (chip) chip.classList.remove('gold');
+      flyEnergy(chip, function () { renderEnergy(); popPlusOne(); });
     });
+  }
+
+  /* Фаза 1 золотого слова: класс gold-burst на чипе (CSS-анимация
+     GOLD_BURST_MS), по animationend — done(). Без DOM-геометрии (тесты) и
+     при reduced-motion — сразу done(), как и flyEnergy. */
+  function burstChip(chip, done) {
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (!chip || reduced || typeof chip.getBoundingClientRect !== 'function' ||
+        typeof requestAnimationFrame !== 'function') { done(); return; }
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      chip.classList.remove('gold-burst');
+      done();
+    }
+    chip.classList.remove('pop');   // обычный «пых» уступает место разрастанию
+    chip.classList.add('gold-burst');
+    chip.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, GOLD_BURST_MS + 120);   // страховка: анимация могла не запуститься (вкладка в фоне)
+  }
+
+  /* Фаза 2 — перелёт ⚡ от чипа к значку запаса в ленте: 700 мс по прямой,
+     стартует полуторным и сжимается к счётчику (CSS .energy-fly). Без
+     DOM-геометрии (тесты) и при reduced-motion — сразу done(): счётчик
+     обновится, «+1» всплывёт без перелёта. */
+  function flyEnergy(chip, done) {
+    var target = elGame ? elGame.querySelector('.energy-icon') : null;
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (!chip || !target || !elEnergyFly || reduced ||
+        typeof chip.getBoundingClientRect !== 'function' ||
+        typeof requestAnimationFrame !== 'function') { done(); return; }
+    var a = chip.getBoundingClientRect(), b = target.getBoundingClientRect();
+    var x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
+    var dx = (b.left + b.width / 2) - x0, dy = (b.top + b.height / 2) - y0;
+    elEnergyFly.hidden = false;
+    // b22: значок крупнее (CSS 26px) — центр считаем по факту, не константой.
+    var fw = elEnergyFly.offsetWidth || 26, fh = elEnergyFly.offsetHeight || 26;
+    elEnergyFly.style.left = (x0 - fw / 2) + 'px';
+    elEnergyFly.style.top = (y0 - fh / 2) + 'px';
+    elEnergyFly.style.transform = 'translate(0,0) scale(1.5)';
+    elEnergyFly.classList.add('run');
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      elEnergyFly.hidden = true;
+      elEnergyFly.style.transform = '';
+      elEnergyFly.classList.remove('run');
+      // Посадка: значок вспыхивает, число на полсекунды золотое (CSS energy-hit / .hit).
+      target.classList.add('pulse');
+      setTimeout(function () { target.classList.remove('pulse'); }, 500);
+      var val = elGame.querySelector('.energy-value');
+      if (val) { val.classList.add('hit'); setTimeout(function () { val.classList.remove('hit'); }, 500); }
+      done();
+    }
+    // Два кадра: первый фиксирует стартовую позицию, второй запускает transition.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        elEnergyFly.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1)';
+      });
+    });
+    elEnergyFly.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, 1000);   // страховка: transitionend может не прийти (вкладка в фоне)
+  }
+
+  /* «+1» всплывает над счётчиком запаса и тает (CSS plus-up, 900 мс). */
+  function popPlusOne() {
+    var target = elGame ? elGame.querySelector('.energy-value') : null;
+    if (!target || !elEnergyPlus || typeof target.getBoundingClientRect !== 'function') return;
+    var b = target.getBoundingClientRect();
+    elEnergyPlus.style.left = (b.right + 6) + 'px';          // правее счётчика, не над кнопкой «назад»
+    elEnergyPlus.style.top = (b.top - 6) + 'px';
+    elEnergyPlus.classList.remove('run');
+    elEnergyPlus.hidden = false;
+    void elEnergyPlus.offsetWidth;   // перезапуск анимации
+    elEnergyPlus.classList.add('run');
+    setTimeout(function () { elEnergyPlus.hidden = true; elEnergyPlus.classList.remove('run'); }, 950);
+  }
+
+  /* ---------- Ролик у стены (b19, гипотеза 2) ---------- */
+  var btnWallAd = document.getElementById('btn-wall-ad');
+
+  function wallAdsToday() {
+    var today = Retention.dayKeyFromDate(new Date(Platform.now()));
+    if (wallAds.d !== today) wallAds = { d: today, n: 0 };
+    return wallAds.n;
+  }
+
+  function renderWallAd() {
+    if (!btnWallAd) return;
+    var left = WALL_ADS_PER_DAY - wallAdsToday();
+    btnWallAd.hidden = left <= 0;
+    btnWallAd.textContent = I18N.fill('wallAd', {
+      n: WALL_AD_ENERGY, lv: I18N.plural(WALL_AD_ENERGY, LV_FORMS),
+    });
+    if (wallSub) wallSub.textContent = I18N.t(left <= 0 ? 'wallAdDone' : 'energyWallSub');
+  }
+
+  function onWallAdClick() {
+    if (wallAdsToday() >= WALL_ADS_PER_DAY) { renderWallAd(); return; }
+    Sound.resumeContext();
+    Platform.showRewarded(
+      // Награда — ТОЛЬКО в onRewarded (стандарт контракта). Адаптеры
+      // зовут onResume раньше onRewarded, поэтому рендер здесь, не там.
+      function () {
+        var before = retentionState.dripOpened;
+        retentionState = Retention.grantDrip(retentionState, RETENTION_CONFIG, WALL_AD_ENERGY);
+        var granted = retentionState.dripOpened - before;
+        wallAds.n++;
+        console.log('[retention] ролик у стены: +' + granted + ' к запасу (' +
+          wallAds.n + ' из ' + WALL_ADS_PER_DAY + ' за день)');
+        persistProgress();
+        renderEnergy();
+        renderWallAd();
+        if (granted > 0) showRetentionToast(I18N.fill('energyToastGain', { n: granted }));
+        continuePendingIfPossible();
+      },
+      function () { Sound.suspend(); },
+      function () { Sound.resume(); }
+    );
   }
 
   // Бейдж бесплатных подсказок — ВТОРАЯ шкала, к запасу отношения не
@@ -351,6 +731,46 @@
     }));
   }
 
+  /* b23 (решение основателя 13.09): такт не «через 4 ч после захода», а
+     ПО ЧАСАМ — в 00:00, 04:00, 08:00, 12:00, 16:00 и 20:00 местного
+     времени игрока, у всех одинаково и кругло. Модуль retention.js (общий с
+     Color Sort, его не трогаем) считает такты от штампа lastTickAt;
+     выравниваем штамп ВНИЗ на ближайшую границу слота до и после каждого
+     applyDripTick — тогда «через tickMs от штампа» и есть следующая круглая
+     граница. Модуль сам сдвигает штамп в «сейчас» при полном запасе и при
+     откате часов — выравнивание возвращает его на границу. Сейв b22
+     (штамп «когда зашёл») мигрирует тем же путём: выровненный штамп ≤
+     старого, начисление придёт не позже прежнего. */
+  var DRIP_SLOT_HOURS = 4;
+  function slotFloorMs(ms) {
+    var d = new Date(ms);
+    var h = d.getHours();
+    d.setHours(h - (h % DRIP_SLOT_HOURS), 0, 0, 0);
+    return d.getTime();
+  }
+  function alignTickAnchor(state) {
+    if (!state || typeof state.lastTickAt !== 'number') return state;
+    var aligned = slotFloorMs(state.lastTickAt);
+    if (aligned === state.lastTickAt) return state;
+    return {
+      dripOpened: state.dripOpened,
+      lastTickAt: aligned,
+      lastEntryDay: state.lastEntryDay,
+      streakLen: state.streakLen,
+      streakRewards: state.streakRewards,
+    };
+  }
+  function dripTick(prev, nowMs) {
+    var next = alignTickAnchor(Retention.applyDripTick(alignTickAnchor(prev), nowMs, RETENTION_CONFIG));
+    // Тот же штамп и запас — состояние не менялось: возвращаем prev, чтобы
+    // retentionTick не писал сейв каждые 30 с (раньше при полном запасе
+    // штамп «сейчас» менялся на каждом такте таймера).
+    if (next !== prev && next.dripOpened === prev.dripOpened && next.lastTickAt === prev.lastTickAt &&
+        next.lastEntryDay === prev.lastEntryDay && next.streakLen === prev.streakLen &&
+        next.streakRewards === prev.streakRewards) return prev;
+    return next;
+  }
+
   /* Такт раздатчика. Вызывается по таймеру и в точках возврата в меню.
      ВАЖНО: сохраняем при ЛЮБОМ изменении состояния, а не только при
      начислении — applyDripTick подтягивает штамп ещё в двух случаях
@@ -363,7 +783,7 @@
     var before = prev.dripOpened;
     var nowMs = Platform.now();
     var rolledBack = nowMs < prev.lastTickAt;
-    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    retentionState = dripTick(prev, nowMs);   // b23: такт по часам
     // Перерисовываем ВСЕГДА: строка может нести обратный отсчёт, и он
     // обязан идти, даже когда состояние модуля не менялось. Запись в
     // сейв — только при реальном изменении, рендер записи не требует.
@@ -378,10 +798,10 @@
       showRetentionToast(I18N.fill('energyToastGain', { n: granted }));
       continuePendingIfPossible();
     } else if (rolledBack) {
-      console.log('[retention] часы устройства ушли НАЗАД: начисления нет, штамп подтянут к «сейчас» — ' +
+      console.log('[retention] часы устройства ушли НАЗАД: начисления нет, штамп подтянут к границе слота ≤ «сейчас» — ' +
         'иначе следующий такт наступил бы только когда реальное время догонит старый штамп');
     } else {
-      console.log('[retention] запас на потолке: начисления нет, штамп подтянут к «сейчас» — ' +
+      console.log('[retention] запас на потолке: начисления нет, штамп подтянут к границе слота ≤ «сейчас» — ' +
         'простой не банкуется в тени');
     }
   }
@@ -421,6 +841,7 @@
     if (wallText) wallText.textContent = I18N.fill('energyWallText', wallVars);
     if (wallSub) wallSub.textContent = I18N.t('energyWallSub');
     if (btnWallMenu) btnWallMenu.textContent = I18N.t('energyWallBack');
+    renderWallAd();   // b19: кнопка ролика и подпись про дневной лимит
     showScreen(elWall);
   }
 
@@ -460,10 +881,23 @@
         ' → запас полный ' + RETENTION_CONFIG.accumulatorCap + ', прогресс и рекорды не тронуты');
     }
     bonusHints = (data && typeof data.bh === 'number' && data.bh > 0) ? Math.floor(data.bh) : 0;
+    // b19: поля календаря и ролика у стены. У сейва b18 их нет — дефолты,
+    // день календаря тогда считается по серии модуля (r.s), ничего не
+    // сбрасывается.
+    calOffset    = (data && data.co === 1) ? 1 : 0;
+    dailyPending = (data && typeof data.dp === 'number' && data.dp > 0) ? Math.floor(data.dp) : 0;
+    goldHints    = (data && typeof data.gh === 'number' && data.gh > 0) ? Math.floor(data.gh) : 0;
+    wallAds = (data && data.wa && typeof data.wa.d === 'string' && typeof data.wa.n === 'number')
+      ? { d: data.wa.d, n: Math.max(0, Math.floor(data.wa.n)) }
+      : { d: '', n: 0 };
+    // b20: забранные золотые слова. У сейва b19 поля нет — пусто.
+    goldClaimed = (data && Array.isArray(data.gw))
+      ? data.gw.filter(function (n) { return typeof n === 'number'; })
+      : [];
 
-    // Такт за время, пока игра была закрыта.
+    // Такт за время, пока игра была закрыта (b23: по часам, см. dripTick).
     var prev = retentionState;
-    retentionState = Retention.applyDripTick(prev, nowMs, RETENTION_CONFIG);
+    retentionState = dripTick(prev, nowMs);
     var granted = retentionState.dripOpened - prev.dripOpened;
     if (granted > 0) {
       console.log('[retention] за время без игры набежало +' + granted +
@@ -474,27 +908,42 @@
     // День берём из Platform.now() — той же единой точки времени, что и
     // такт (в эталоне серия читала часы отдельно; здесь ТЗ требует одну
     // точку, иначе живая приёмка серии подменой даты невозможна).
+    var prevEntryDay = retentionState.lastEntryDay;
     var entry = Retention.onEnter(retentionState, Retention.dayKeyFromDate(new Date(nowMs)), RETENTION_CONFIG);
     var streakChanged = entry.state !== retentionState;
     retentionState = entry.state;
-    if (entry.reward === 'hints') {
-      var day = retentionState.streakLen;
-      var amount = RETENTION_CONFIG.streakHintsByDay[day] || 0;
-      if (amount > 0) RETENTION_CONFIG.callbacks.grantHints(amount, day);
-      else console.log('[retention] день серии ' + day + ' помечен наградой, но количество не задано — не выдано');
-    } else if (!streakChanged) {
-      console.log('[retention] сегодня уже входили: серия ' + retentionState.streakLen +
-        ' дн., награда повторно НЕ выдаётся');
+    /* b19: награду дня считает календарь, не модуль (entry.reward всегда
+       null — см. конфиг). Новый календарный день → день календаря по
+       серии модуля с поправкой calOffset, награда ждёт кнопки «Забрать». */
+    if (streakChanged) {
+      var len = retentionState.streakLen;
+      if (len === 0) {
+        // Пропуск: модуль считает серию с нуля, календарь показывает
+        // «День 1» с наградой — вернувшийся после перерыва не уходит ни с чем.
+        calOffset = 1;
+        console.log('[calendar] серия прервана пропуском — календарь начинается с дня 1 заново');
+      } else if (len === 1 && prevEntryDay === '') {
+        calOffset = 0;   // самый первый вход в жизни
+      }
+      dailyPending = calendarDay(len + calOffset);
+      console.log('[calendar] новый день: день ' + dailyPending + ' из ' + DAILY_DAYS +
+        ' (серия модуля ' + len + ') — награда ждёт кнопки «Забрать»');
+    } else if (dailyPending > 0) {
+      console.log('[calendar] сегодня уже входили, награда дня ' + dailyPending +
+        ' ещё не забрана — карточка показывается снова');
     } else {
-      console.log('[retention] вход засчитан: серия ' + retentionState.streakLen +
-        ' дн., награды на этот день нет');
+      console.log('[retention] сегодня уже входили: серия ' + retentionState.streakLen +
+        ' дн., награда дня уже забрана — карточки нет');
     }
     if (granted > 0 || streakChanged || !hasModuleFields) persistProgress();
 
     renderEnergy();
-    renderStreakLine();
+    renderDailyLine();
     renderHintBadge();
     updateHintLabel();
+    // Карточка календаря — поверх меню, ПОСЛЕ Game Ready (см. start()).
+    if (dailyPending > 0) showDaily(dailyPending);
+    else if (elDaily) elDaily.hidden = true;
     /* Фоновый такт. typeof-гейт — не перестраховка: в песочнице тестов
        (vm-контекст без setInterval) вызов уронил бы весь старт игры, а
        сам такт там не нужен — тесты гоняют retentionTick реальными
@@ -507,6 +956,7 @@
   }
 
   function showScreen(el) {
+    setEnergyPop(false);   // b23: попап «?» живёт только на игровом экране
     var screens = document.querySelectorAll('.screen');
     for (var s = 0; s < screens.length; s++) screens[s].classList.remove('is-active');
     el.classList.add('is-active');
@@ -518,19 +968,24 @@
   function setMenuProgress(has) {
     btnContinue.hidden = !has;
     btnPlay.hidden = has;
+    // b20: всё пройдено — обещание продолжения видно и в меню.
+    if (elMenuMore) elMenuMore.hidden = !(Levels.count() > 0 && maxUnlocked >= Levels.count());
   }
 
   // Подпись кнопки подсказки: обещает ролик только если реклама реально
   // доступна (задача А, п.180) — кнопка сама всегда видна, см. start().
   function updateHintLabel() {
     if (!btnHint) return;
+    // b19: золотая подсказка (день 7 календаря) — самая сильная, тратится
+    // первой; кнопка честно говорит, что откроет слово целиком.
+    if (goldHints > 0) { btnHint.textContent = I18N.t('hintGold'); return; }
     // ЭТАП 3: пока есть бесплатные подсказки из серии входов, кнопка НЕ
     // обещает ролик — она его и не покажет (баланс тратится первым).
     if (bonusHints > 0) { btnHint.textContent = I18N.t('hintBonusHint'); return; }
     btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
   }
 
-  function renderWordList(level) {
+  function renderWordList(level, goldWord) {
     if (!elWordList) return;
     elWordList.innerHTML = '';
     var chain = (level.chain && level.chain.length) ? level.chain : level.words.map(function (w) { return w.word; });
@@ -543,6 +998,7 @@
       }
       var span = document.createElement('span');
       span.className = 'word-chip' + (i === 0 ? ' current' : '');
+      if (goldWord && chain[i] === goldWord) span.classList.add('gold');   // b20
       span.dataset.word = chain[i];
       span.textContent = chain[i];
       elWordList.appendChild(span);
@@ -564,7 +1020,9 @@
     elWin.hidden = true;
     if (elHowto) elHowto.hidden = (index !== 0);
     showScreen(elGame);
-    renderWordList(level);
+    // b20: золотое слово уровня (null — уровень не золотой или уже забрано).
+    var goldWord = goldWordFor(index, level);
+    renderWordList(level, goldWord);
 
     // Сохраняем прогресс (текущий уровень). Переживает обновление страницы (п.1.9).
     maxUnlocked = Math.max(maxUnlocked, index);
@@ -600,10 +1058,14 @@
         levelScore += 100;
         if (level.chain && level.chain.length) chainPos++;
         hintWord = (level.chain && chainPos < level.chain.length) ? level.chain[chainPos] : null;
-        if (elHowto) elHowto.hidden = true;
+        // b19: строка про порядок цепочки на 1-м уровне остаётся до конца
+        // уровня — раньше исчезала после первого слова, а правило
+        // цепочки объясняла только она (диагноз §1.2, п.2).
         // Пометить найденный чип: пых + зачёркнуть.
         var chip = document.querySelector('#word-list .word-chip[data-word="' + word + '"]');
         if (chip) { chip.classList.add('pop'); chip.classList.add('found'); chip.classList.remove('current'); }
+        // b20: золотое слово — разово, +1 к запасу с перелётом к счётчику.
+        if (goldWord && word === goldWord) { goldWord = null; claimGoldWord(index, chip); }
         // Подсветить следующее слово в цепочке (CSS-transition плавно проявит рамку).
         if (level.chain && chainPos < level.chain.length) {
           var nextChip = document.querySelector('#word-list .word-chip[data-word="' + level.chain[chainPos] + '"]');
@@ -655,6 +1117,11 @@
           if (elWinScore) elWinScore.textContent = I18N.t('score') + ': ' + finalScore;
           if (elWinBest)  elWinBest.textContent  = I18N.t('best')  + ': ' + Math.max(best, finalScore);
           if (elWinNew)   elWinNew.hidden = !isNew;
+          // b19: о близкой стене игрок узнаёт ДО того, как в неё упрётся.
+          // Текст строки ставит renderEnergy() по классу .energy-line.
+          if (elWinEnergy) elWinEnergy.hidden = !(retentionState && energyLeft() <= WIN_ENERGY_WARN);
+          // b20: после последнего уровня — обещание продолжения (решение основателя 12.09).
+          if (elWinMore) elWinMore.hidden = !isLast;
           elWin.hidden = false;
           popCard();
           confettiBurst();
@@ -665,6 +1132,9 @@
         // Подсветить первую клетку нужного слова.
         if (level.chain && chainPos < level.chain.length) {
           Board.nudgeCurrent(level.chain[chainPos]);
+          // b19: словами, не только пульсом — «верное слово не принято»
+          // без объяснения было первым разочарованием на 1-м уровне.
+          showRetentionToast(I18N.fill('outOfOrder', { word: level.chain[chainPos] }));
         }
         // Пульс «сердцебиение» на текущем чипе.
         var hbChip = document.querySelector('#word-list .word-chip.current');
@@ -721,12 +1191,32 @@
 
   var LOCK_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
+  // b21: уровни идут главами по 10 (levels.js v2, поле theme = название
+  // главы). В сетке выбора перед каждой десяткой — заголовок
+  // «Глава 2 · Сад и огород · 4/10»; пройдено = индексы ниже maxUnlocked
+  // (он растёт только прохождением). Знаменатель здесь допустим — сетка
+  // выбора уровня и так исключение из правила «только Уровень N».
+  var CHAPTER_SIZE = 10;
+  function chapterHead(start, count) {
+    var end = Math.min(start + CHAPTER_SIZE, count);
+    var done = Math.max(0, Math.min(end, maxUnlocked) - start);
+    var first = Levels.get(start);
+    var head = document.createElement('div');
+    head.className = 'lv-chapter' +
+      (done === end - start ? ' done' : '') +
+      (start > maxUnlocked ? ' locked' : '');
+    head.textContent = I18N.t('chapter') + ' ' + (Math.floor(start / CHAPTER_SIZE) + 1) +
+      ' · ' + ((first && first.theme) || '') + ' · ' + done + '/' + (end - start);
+    return head;
+  }
+
   function renderLevels() {
     if (!levelsGrid) return;
     levelsGrid.innerHTML = '';
     if (lvTotal) lvTotal.textContent = records.total > 0 ? 'Итого: ' + records.total : '';
     var count = Levels.count();
     for (var i = 0; i < count; i++) {
+      if (i % CHAPTER_SIZE === 0) levelsGrid.appendChild(chapterHead(i, count));
       var tile = document.createElement('button');
       tile.className = 'lv-tile';
       if (i > maxUnlocked) {
@@ -768,7 +1258,7 @@
       // Стики-баннер (задача Б): гарантированная рекламная поверхность,
       // не зависящая от гейта interstitial/rewarded. No-op на площадках
       // без поддержки — метод обязан существовать в контракте у всех.
-      Platform.showBanner();
+      Platform.showBanner(function (insetPx) { setBannerInset(insetPx); });   // b23: полоса под баннер
 
       // Прогресс грузим параллельно, чтобы не задерживать Game Ready.
       Platform.load().then(function (data) {
@@ -803,7 +1293,7 @@
   function goToMenu() {
     retentionTick();
     renderEnergy();
-    renderStreakLine();
+    renderDailyLine();
     showScreen(elMenu);
   }
 
@@ -853,14 +1343,19 @@
       }
     }
 
-    // Гейт частоты (задача Б, п.4.7; числа — ЭТАП 2, п.1.4): каждый
-    // AD_LEVEL_GATE-й уровень И не чаще раза в AD_MIN_INTERVAL_MS —
+    // Гейт частоты (задача Б, п.4.7; расписание — b20, см. adLevelGate): каждый
+    // adLevelGate(N)-й уровень И не чаще раза в AD_MIN_INTERVAL_MS —
     // оба условия обязательны. Раньше показ был безусловным на каждый
     // переход (SDK сам якобы соблюдает интервал) — за 41 запуск на ВК
     // это дало 0 показов рекламы; гейт даёт предсказуемые точки показа.
+    // b20: порог по номеру только что пройденного уровня (currentIndex — ещё
+    // он). В зоне без рекламы счётчик держим на нуле: первый показ после неё
+    // приходит через полный порог, а не сразу на 16-м уровне.
+    var gate = adLevelGate(currentIndex + 1);
+    if (gate === 0) { levelsSinceAd = 0; proceed(); return; }
     levelsSinceAd++;
     var now = Date.now();
-    var gateOk = levelsSinceAd >= AD_LEVEL_GATE && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
+    var gateOk = levelsSinceAd >= gate && (now - lastAdShownAt) >= AD_MIN_INTERVAL_MS;
 
     if (!gateOk) {
       // ДОБОР ЭТАПА 2, п.1: счётчик levelsSinceAd здесь НЕ обнуляется —
@@ -907,6 +1402,19 @@
   // задача А), ролик не пытаемся показывать вовсе: кнопка это не обещает.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
+    /* b19: золотая подсказка (день 7 календаря) — открывает целевое
+       слово целиком. Тратится раньше обычных бесплатных: кнопка это
+       обещала подписью (updateHintLabel). Для счёта уровня — одна
+       подсказка, как любая другая. */
+    if (goldHints > 0) {
+      goldHints--;
+      hintsUsed++;
+      console.log('[calendar] золотая подсказка: слово «' + hintWord + '» открыто целиком, осталось ' + goldHints);
+      persistProgress();
+      updateHintLabel();
+      Board.revealWord(hintWord);
+      return;
+    }
     /* ЭТАП 3: бесплатные подсказки из серии входов тратятся ПЕРВЫМИ —
        реклама не запрашивается, пока баланс не пуст. Это ВТОРАЯ шкала:
        к запасу энергии она не имеет отношения и его не читает.
@@ -938,6 +1446,15 @@
     elTutorial.hidden = true;
     tutorialShown = true;
   });
+
+  // b19: «Забрать» награду дня — первый жест сессии, заодно разрешает звук.
+  if (btnDailyClaim) btnDailyClaim.addEventListener('click', function () {
+    Sound.resumeContext();
+    claimDaily();
+  });
+
+  // b19: ролик у стены.
+  if (btnWallAd) btnWallAd.addEventListener('click', onWallAdClick);
 
   btnContinue.addEventListener('click', function () {
     Sound.resumeContext();

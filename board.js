@@ -55,15 +55,44 @@ window.Board = (function () {
     fit();
   }
 
+  var MAX_CELL_PX = 60;   // b23: клетка не крупнее 60 px
+
   function fit() {
     if (!current || !wrapEl) return;
-    var size = Math.min(wrapEl.clientWidth, wrapEl.clientHeight);
+    // b22: обёртка — flex-ребёнок с внутренними отступами (style.css
+    // .board-wrap); поле обязано умещаться в её КОНТЕНТНУЮ область,
+    // иначе выезжало бы на ленту запаса и список слов.
+    var padX = 0, padY = 0;
+    // b23: снимаем прошлый потолок обёртки, чтобы измерить всё доступное
+    // место (иначе после уменьшения окна обёртка не смогла бы вырасти).
+    wrapEl.style.maxHeight = '';
+    if (typeof getComputedStyle === 'function') {
+      var cs = getComputedStyle(wrapEl);
+      padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    }
+    var maxW = Math.max(0, wrapEl.clientWidth - padX);
+    var maxH = Math.max(0, wrapEl.clientHeight - padY);
+    // Вписываем по ОБОИМ измерениям с учётом пропорции: у высокого поля
+    // (8×6) ширина не должна резать высоту — раньше size = min(w, h)
+    // считался до пропорции, и на 360px поле теряло ~50px высоты зря.
     var ratio = current.cols / current.rows;
-    var w = size, h = size;
-    if (ratio > 1) h = size / ratio;
-    else if (ratio < 1) w = size * ratio;
+    var h = Math.min(maxH, maxW / ratio);
+    // b23: потолок размера клетки — на высоких экранах поле не раздувается,
+    // цепочка и кнопка стоят выше (компактнее под баннер, решение 13.09).
+    var gap = 5;
+    if (typeof getComputedStyle === 'function') {
+      var g = parseFloat(getComputedStyle(boardEl).rowGap);
+      if (!isNaN(g)) gap = g;
+    }
+    h = Math.min(h, current.rows * MAX_CELL_PX + (current.rows - 1) * gap);
+    var w = h * ratio;
     boardEl.style.width = Math.floor(w) + 'px';
     boardEl.style.height = Math.floor(h) + 'px';
+    // b23: обёртка не выше поля — цепочка слов и кнопка встают сразу под
+    // полем, а не у самого низа экрана (решение основателя 13.09: «сетку
+    // слов чуть выше»); свободное место остаётся внизу, под баннером.
+    wrapEl.style.maxHeight = (Math.floor(h) + padY) + 'px';
   }
 
   function clear() {
@@ -243,5 +272,25 @@ window.Board = (function () {
     setTimeout(function () { el.classList.remove('nudge'); }, 1200);
   }
 
-  return { init: init, render: render, clear: clear, revealHint: revealHint, nudgeCurrent: nudgeCurrent };
+  // Золотая подсказка (b19, день 7 календаря): подсветить ВСЕ ещё не
+  // подсвеченные буквы целевого слова разом (та же янтарная рамка, что
+  // у revealHint). false — если слово не найдено в уровне или уже собрано.
+  function revealWord(targetWord) {
+    if (!current || !targetWord) return false;
+    var entry = null;
+    for (var i = 0; i < current.words.length; i++) {
+      if (current.words[i].word === targetWord) { entry = current.words[i]; break; }
+    }
+    if (!entry || found[entry.word]) return false;
+    var any = false;
+    for (var j = 0; j < entry.path.length; j++) {
+      var rc = entry.path[j];
+      var el = boardEl.querySelector('.cell[data-r="' + rc[0] + '"][data-c="' + rc[1] + '"]');
+      if (el && !el.classList.contains('hint')) { el.classList.add('hint'); any = true; }
+    }
+    return any;
+  }
+
+  // fit — наружу: main.js пересчитывает поле, когда меняется полоса под баннер (b23).
+  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent, fit: fit };
 })();

@@ -44,6 +44,11 @@ window.Sound = (function () {
   }
 
   function found() { beep(660, 0.12, 'triangle', 0.18); }
+  // b20: золотое слово — два коротких восходящих тона поверх found().
+  function gold() {
+    beep(880, 0.08, 'triangle', 0.16);
+    setTimeout(function () { beep(1320, 0.12, 'triangle', 0.16); }, 70);
+  }
   function wrong() { beep(150, 0.18, 'sawtooth', 0.14); }
   function win() {
     beep(523, 0.12, 'triangle', 0.2);
@@ -67,7 +72,7 @@ window.Sound = (function () {
 
   return {
     init: init, resumeContext: resumeContext,
-    found: found, wrong: wrong, win: win,
+    found: found, wrong: wrong, win: win, gold: gold,
     suspend: suspend, resume: resume,
     setMuted: setMuted, isMuted: isMuted,
   };

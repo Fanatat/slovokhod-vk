@@ -45,7 +45,8 @@
                                  result.result === true → досмотрено, награда;
                                  result !== true → показан, но не досмотрен → БЕЗ награды;
                                  reject/таймаут → награда БЕСПЛАТНО (ЭТАП 2, п.1.1)
-     showBanner()               → VKWebAppShowBannerAd {banner_location:'top', layout_type:'resize'}.
+     showBanner(onInset)        → VKWebAppShowBannerAd {banner_location:'bottom', layout_type:'resize'};
+                                  onInset(px) — сколько баннер перекрывает снизу (0 при resize).
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
                                  interstitial/rewarded, вызывается один раз при старте.
      canPurchase()/purchase()   → присутствуют в контракте (см. примечание выше), в этой
@@ -346,16 +347,24 @@ window.Platform = (() => {
      баннер, вручную резервировать место в CSS не нужно.
      Params сверены по исходникам @vkontakte/vk-bridge
      (packages/core/src/types/data.ts): ShowBannerAdRequest. */
-  function showBanner() {
+  function showBanner(onInset) {
     if (!ready) {
       console.warn('[platform] dev: banner пропущен');
       return;
     }
+    // b23 (решение основателя 13.09): баннер СНИЗУ на постоянной основе.
+    // layout_type:'resize' — клиент сам ужимает окно; если клиент ответил
+    // 'overlay', сообщаем main.js высоту баннера, чтобы экран отступил.
     vkBridge.send('VKWebAppShowBannerAd', {
-      banner_location: 'top',
+      banner_location: 'bottom',
       layout_type: 'resize',
       height_type: 'compact',
       orientation: 'vertical',
+    }).then((r) => {
+      const overlay = !!(r && r.layout_type === 'overlay');
+      const h = (overlay && typeof r.banner_height === 'number') ? r.banner_height : 0;
+      console.log('[platform] banner: ' + JSON.stringify(r) + ' → полоса снизу ' + h + 'px');
+      if (typeof onInset === 'function') onInset(h);
     }).catch((e) => {
       console.warn('[platform] banner недоступен:', e);
     });
