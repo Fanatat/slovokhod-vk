@@ -196,9 +196,24 @@ html, body {
    поэтому перекраска позже = смена значений в :root, не правка логики.
    ============================================================ */
 
+/* b22: игровой экран собран ПОТОКОМ (flex-колонка), а не абсолютными
+   отступами: шапка → лента запаса → поле (всё, что осталось) → подсказка
+   первого уровня → цепочка слов → кнопка. До b22 поле и список стояли на
+   фиксированных bottom-отступах (188/84 px): цепочка из 7–8 слов (главы
+   8–10) в 3–4 строки упиралась в поле, а на ≤360px под поле уходила и
+   вторая строка ленты запаса (замечание основателя по b21 в ВК, 13.09).
+   Теперь поле ужимается под остаток высоты — Board.fit читает размеры
+   обёртки. Оверлеи и перелёт ⚡ остаются absolute/fixed — они вне потока. */
+#game.screen {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0 0 max(24px, env(safe-area-inset-bottom));
+}
+
 .game-head {
-  position: absolute;
-  top: 0; left: 0; right: 0;
+  position: relative;
+  flex: 0 0 auto;
   height: 64px;
   display: flex;
   align-items: center;
@@ -221,42 +236,41 @@ html, body {
 }
 .icon-btn:active { transform: scale(0.96); }
 
-/* Область под поле: между лентой запаса и списком слов.
-   ЭТАП 3: верх сдвинут с 64 на 88 — под шапкой появилась лента запаса
-   (.energy-row-game, тоже absolute: весь игровой экран собран на
-   абсолютном позиционировании, поточный элемент здесь уехал бы в центр
-   и лёг под поле). */
+/* Область под поле: забирает всю высоту между лентой запаса и списком
+   слов (flex: 1). min-height: 0 обязателен — иначе flex-ребёнок не
+   ужимается и поле снова легло бы на список. Отступы — часть обёртки,
+   Board.fit их вычитает (поле не выезжает за контентную область). */
 .board-wrap {
-  position: absolute;
-  top: 88px; left: 0; right: 0; bottom: 188px;
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 32px;
+  padding: 10px 24px;
 }
 
 /* Список слов уровня: над кнопкой подсказки. */
 .howto {
-  position: absolute;
-  left: 0; right: 0;
-  bottom: 122px;
-  margin: 0;
+  flex: 0 0 auto;
+  margin: 0 0 6px;
+  padding: 0 8px;
   text-align: center;
   color: var(--text-dim);
   font-size: 14px;
 }
 
 .word-list {
-  position: absolute;
-  left: 0; right: 0;
-  bottom: 84px;
+  flex: 0 0 auto;
+  max-height: 34vh;         /* страховка для очень низких экранов: список прокручивается, поле не схлопывается */
+  margin: 0 0 8px;
   padding: 4px 16px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  align-content: flex-end;
+  align-content: flex-start;
   gap: 6px;
-  overflow: hidden;
+  overflow-y: auto;
 }
 .word-chip {
   background: var(--surface);
@@ -294,17 +308,28 @@ html, body {
 }
 .word-chip.gold::before { content: '⚡'; margin-right: 3px; font-size: 12px; }
 .word-chip.gold.current { border-color: var(--accent2); }
+/* b22: фаза 1 золотого слова (main.js burstChip) — чип держит золотой вид без
+   зачёркивания и поднимается над соседями, пока разрастается; само движение —
+   в блоке motion ниже. */
+.word-chip.gold-burst {
+  position: relative;
+  z-index: 5;
+  text-decoration: none;
+  background: var(--gold-tint);
+  border-color: var(--gold);
+  color: var(--gold-ink);
+}
 /* Перелёт ⚡ и «+1»: fixed, координаты ставит main.js; движение — в блоке motion ниже. */
 .energy-fly {
   position: fixed; left: 0; top: 0; z-index: 60;
-  font-size: 18px; line-height: 1;
+  font-size: 26px; line-height: 1;
   pointer-events: none;
   will-change: transform;
 }
 .energy-fly[hidden] { display: none; }
 .energy-plus {
   position: fixed; left: 0; top: 0; z-index: 60;
-  font-weight: 700; font-size: 15px; line-height: 1;
+  font-weight: 700; font-size: 18px; line-height: 1;
   color: var(--gold-ink);
   pointer-events: none;
 }
@@ -375,10 +400,9 @@ html, body {
    остатка бесплатных подсказок должен висеть у угла кнопки, а у
    absolute-кнопки нет собственной системы координат для потомка. */
 .hint-wrap {
-  position: absolute;
-  left: 50%;
-  bottom: max(28px, env(safe-area-inset-bottom));
-  transform: translateX(-50%);
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
 }
 .hint-btn {
   border: 0;
@@ -444,9 +468,8 @@ html, body {
 /* На игровом экране строка идёт тонкой лентой под шапкой: одна строка,
    без переноса — вертикаль там нужна полю, а не тексту. */
 .energy-row-game {
-  position: absolute;
-  top: 64px; left: 0; right: 0;
-  margin: 0;
+  flex: 0 0 auto;
+  margin: 0 0 2px;
   padding: 0 14px;
   max-width: none;
   flex-wrap: nowrap;
@@ -455,13 +478,17 @@ html, body {
   font-size: 13px;
 }
 .energy-row-game .energy-value { font-size: 14px; }
+/* b22: строка «Хватит на … · +10 в …» стоит РЯДОМ со счётчиком и цветом
+   чернил, не приглушённая — на десктопном ВК (окно ~1000 px) прижатая к
+   правому краю и серая она терялась (скриншот основателя 13.09). */
 .energy-row-game .energy-line {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: right;
+  text-align: left;
+  color: var(--text);
 }
 
 .streak-line {
@@ -670,18 +697,43 @@ html, body {
   }
   .word-chip.pop { animation: chip-pop 180ms ease; }
 
-  /* b20: перелёт ⚡ к счётчику (650 мс, растёт к концу), «+1» всплывает и тает,
-     значок в шапке пыхает по прибытии. */
-  .energy-fly { transition: transform 650ms ease-in; }
+  /* b20 → b22: золотое слово в ДВЕ фазы (main.js claimGoldWord → burstChip →
+     flyEnergy; решение основателя 13.09 — «ярче»). Фаза 1: чип внизу
+     разрастается до 1,45× с золотым свечением (GOLD_BURST_MS = 420 мс) и
+     остаётся крупным. Фаза 2: ⚡ стартует полуторным от чипа и 700 мс летит к
+     счётчику, сжимаясь и мерцая; по прибытии значок в ленте вспыхивает до
+     1,6×, число окрашивается золотом, «+1» всплывает и тает; сам чип плавно
+     садится обратно (transition transform). */
+  @keyframes gold-burst {
+    0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(217,164,65,0); }
+    55%  { transform: scale(1.45); box-shadow: 0 0 0 6px rgba(217,164,65,0.35), 0 0 22px 6px rgba(217,164,65,0.6); }
+    100% { transform: scale(1.3);  box-shadow: 0 0 0 4px rgba(217,164,65,0.3), 0 0 16px 4px rgba(217,164,65,0.45); }
+  }
+  .word-chip.gold-burst { animation: gold-burst 420ms cubic-bezier(0.2, 0.8, 0.3, 1.2) forwards; }
+  .energy-fly { transition: transform 700ms cubic-bezier(0.35, 0, 0.25, 1); }
+  @keyframes fly-glow {
+    0%, 100% { filter: drop-shadow(0 0 3px rgba(217,164,65,0.9)); }
+    50%      { filter: drop-shadow(0 0 12px rgba(217,164,65,1)); }
+  }
+  .energy-fly.run { animation: fly-glow 350ms ease-in-out infinite; }
   @keyframes plus-up {
     from { opacity: 1; transform: translateY(0); }
-    to   { opacity: 0; transform: translateY(-18px); }
+    to   { opacity: 0; transform: translateY(-22px); }
   }
-  .energy-plus.run { animation: plus-up 900ms ease-out forwards; }
-  .energy-icon.pulse { animation: chip-pop 240ms ease; }
+  .energy-plus.run { animation: plus-up 1000ms ease-out forwards; }
+  @keyframes energy-hit {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.6); filter: drop-shadow(0 0 10px rgba(217,164,65,1)); }
+    100% { transform: scale(1); }
+  }
+  .energy-icon.pulse { animation: energy-hit 480ms ease-out; }
+  .energy-value { transition: color 600ms ease; }
+  .energy-value.hit { color: var(--gold-ink); transition: color 0s; }
 
-  /* Плавный переход подсветки текущего звена. */
-  .word-chip { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+  /* Плавный переход подсветки текущего звена; transform/box-shadow —
+     посадка чипа после фазы 1 золотого слова. */
+  .word-chip { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+                           transform 0.25s ease, box-shadow 0.25s ease; }
 
   /* Подсказка «начни отсюда»: глиняная рамка пульсирует ~1.2с (2 × 600мс). */
   @keyframes nudge-pulse {

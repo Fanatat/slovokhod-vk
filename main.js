@@ -158,6 +158,7 @@
      и повтор чип не золотят, абузить нечего. Цель — азарт и первая сессия
      без стены и без принудительной рекламы (см. adLevelGate ниже). */
   var GOLD_LEVELS = [1, 2, 4, 5, 7, 9, 10, 11, 13, 15];
+  var GOLD_BURST_MS = 420; // b22: фаза 1 — чип разрастается (CSS gold-burst), потом перелёт ⚡
   var goldClaimed = [];   // номера уровней (1-based), где золотое слово уже забрано
 
   function goldWordFor(index, level) {
@@ -515,14 +516,39 @@
     console.log('[gold] уровень ' + (index + 1) + ': золотое слово найдено, +1 к запасу, стало ' +
       retentionState.dripOpened);
     persist({ level: index, max: maxUnlocked, records: records });
-    if (chip) chip.classList.remove('gold');
     if (typeof Sound.gold === 'function') Sound.gold();
-    flyEnergy(chip, function () { renderEnergy(); popPlusOne(); });
+    // b22 (решение основателя 13.09): две фазы — сначала чип внизу
+    // разрастается на месте, и только потом ⚡ отделяется и летит к счётчику.
+    burstChip(chip, function () {
+      if (chip) chip.classList.remove('gold');
+      flyEnergy(chip, function () { renderEnergy(); popPlusOne(); });
+    });
   }
 
-  /* Перелёт ⚡ от чипа к значку запаса в шапке: 650 мс по прямой, растёт к
-     концу (CSS .energy-fly). Без DOM-геометрии (тесты) и при reduced-motion —
-     сразу done(): счётчик обновится, «+1» всплывёт без перелёта. */
+  /* Фаза 1 золотого слова: класс gold-burst на чипе (CSS-анимация
+     GOLD_BURST_MS), по animationend — done(). Без DOM-геометрии (тесты) и
+     при reduced-motion — сразу done(), как и flyEnergy. */
+  function burstChip(chip, done) {
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (!chip || reduced || typeof chip.getBoundingClientRect !== 'function' ||
+        typeof requestAnimationFrame !== 'function') { done(); return; }
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      chip.classList.remove('gold-burst');
+      done();
+    }
+    chip.classList.remove('pop');   // обычный «пых» уступает место разрастанию
+    chip.classList.add('gold-burst');
+    chip.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, GOLD_BURST_MS + 120);   // страховка: анимация могла не запуститься (вкладка в фоне)
+  }
+
+  /* Фаза 2 — перелёт ⚡ от чипа к значку запаса в ленте: 700 мс по прямой,
+     стартует полуторным и сжимается к счётчику (CSS .energy-fly). Без
+     DOM-геометрии (тесты) и при reduced-motion — сразу done(): счётчик
+     обновится, «+1» всплывёт без перелёта. */
   function flyEnergy(chip, done) {
     var target = elGame ? elGame.querySelector('.energy-icon') : null;
     var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -532,28 +558,35 @@
     var a = chip.getBoundingClientRect(), b = target.getBoundingClientRect();
     var x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
     var dx = (b.left + b.width / 2) - x0, dy = (b.top + b.height / 2) - y0;
-    elEnergyFly.style.left = (x0 - 9) + 'px';
-    elEnergyFly.style.top = (y0 - 9) + 'px';
-    elEnergyFly.style.transform = 'translate(0,0) scale(1)';
     elEnergyFly.hidden = false;
+    // b22: значок крупнее (CSS 26px) — центр считаем по факту, не константой.
+    var fw = elEnergyFly.offsetWidth || 26, fh = elEnergyFly.offsetHeight || 26;
+    elEnergyFly.style.left = (x0 - fw / 2) + 'px';
+    elEnergyFly.style.top = (y0 - fh / 2) + 'px';
+    elEnergyFly.style.transform = 'translate(0,0) scale(1.5)';
+    elEnergyFly.classList.add('run');
     var finished = false;
     function finish() {
       if (finished) return;
       finished = true;
       elEnergyFly.hidden = true;
       elEnergyFly.style.transform = '';
+      elEnergyFly.classList.remove('run');
+      // Посадка: значок вспыхивает, число на полсекунды золотое (CSS energy-hit / .hit).
       target.classList.add('pulse');
-      setTimeout(function () { target.classList.remove('pulse'); }, 260);
+      setTimeout(function () { target.classList.remove('pulse'); }, 500);
+      var val = elGame.querySelector('.energy-value');
+      if (val) { val.classList.add('hit'); setTimeout(function () { val.classList.remove('hit'); }, 500); }
       done();
     }
     // Два кадра: первый фиксирует стартовую позицию, второй запускает transition.
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        elEnergyFly.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.35)';
+        elEnergyFly.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1)';
       });
     });
     elEnergyFly.addEventListener('transitionend', finish, { once: true });
-    setTimeout(finish, 900);   // страховка: transitionend может не прийти (вкладка в фоне)
+    setTimeout(finish, 1000);   // страховка: transitionend может не прийти (вкладка в фоне)
   }
 
   /* «+1» всплывает над счётчиком запаса и тает (CSS plus-up, 900 мс). */

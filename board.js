@@ -57,11 +57,23 @@ window.Board = (function () {
 
   function fit() {
     if (!current || !wrapEl) return;
-    var size = Math.min(wrapEl.clientWidth, wrapEl.clientHeight);
+    // b22: обёртка — flex-ребёнок с внутренними отступами (style.css
+    // .board-wrap); поле обязано умещаться в её КОНТЕНТНУЮ область,
+    // иначе выезжало бы на ленту запаса и список слов.
+    var padX = 0, padY = 0;
+    if (typeof getComputedStyle === 'function') {
+      var cs = getComputedStyle(wrapEl);
+      padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    }
+    var maxW = Math.max(0, wrapEl.clientWidth - padX);
+    var maxH = Math.max(0, wrapEl.clientHeight - padY);
+    // Вписываем по ОБОИМ измерениям с учётом пропорции: у высокого поля
+    // (8×6) ширина не должна резать высоту — раньше size = min(w, h)
+    // считался до пропорции, и на 360px поле теряло ~50px высоты зря.
     var ratio = current.cols / current.rows;
-    var w = size, h = size;
-    if (ratio > 1) h = size / ratio;
-    else if (ratio < 1) w = size * ratio;
+    var h = Math.min(maxH, maxW / ratio);
+    var w = h * ratio;
     boardEl.style.width = Math.floor(w) + 'px';
     boardEl.style.height = Math.floor(h) + 'px';
   }
