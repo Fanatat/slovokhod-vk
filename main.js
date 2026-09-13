@@ -1067,12 +1067,32 @@
 
   var LOCK_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
+  // b21: уровни идут главами по 10 (levels.js v2, поле theme = название
+  // главы). В сетке выбора перед каждой десяткой — заголовок
+  // «Глава 2 · Сад и огород · 4/10»; пройдено = индексы ниже maxUnlocked
+  // (он растёт только прохождением). Знаменатель здесь допустим — сетка
+  // выбора уровня и так исключение из правила «только Уровень N».
+  var CHAPTER_SIZE = 10;
+  function chapterHead(start, count) {
+    var end = Math.min(start + CHAPTER_SIZE, count);
+    var done = Math.max(0, Math.min(end, maxUnlocked) - start);
+    var first = Levels.get(start);
+    var head = document.createElement('div');
+    head.className = 'lv-chapter' +
+      (done === end - start ? ' done' : '') +
+      (start > maxUnlocked ? ' locked' : '');
+    head.textContent = I18N.t('chapter') + ' ' + (Math.floor(start / CHAPTER_SIZE) + 1) +
+      ' · ' + ((first && first.theme) || '') + ' · ' + done + '/' + (end - start);
+    return head;
+  }
+
   function renderLevels() {
     if (!levelsGrid) return;
     levelsGrid.innerHTML = '';
     if (lvTotal) lvTotal.textContent = records.total > 0 ? 'Итого: ' + records.total : '';
     var count = Levels.count();
     for (var i = 0; i < count; i++) {
+      if (i % CHAPTER_SIZE === 0) levelsGrid.appendChild(chapterHead(i, count));
       var tile = document.createElement('button');
       tile.className = 'lv-tile';
       if (i > maxUnlocked) {

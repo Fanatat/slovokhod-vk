@@ -753,6 +753,21 @@ html, body {
   align-content: start;
 }
 
+/* b21: заголовок главы внутри сетки — на всю ширину строки. */
+.lv-chapter {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 10px 2px 0;
+  border-top: 1px solid var(--tile-border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: .01em;
+}
+.lv-chapter:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.lv-chapter.done { color: var(--accent2); }
+.lv-chapter.locked { opacity: .55; }
+
 /* .lv-tile — независимый класс, не наследует ничего от .cell. */
 .lv-tile {
   appearance: none;
