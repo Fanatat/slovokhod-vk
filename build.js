@@ -1,0 +1,1 @@
+window.BUILD_VERSION = "v57 · 0012043 · 2026-09-15";

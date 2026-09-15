@@ -1,869 +1,1371 @@
-/* ============================================================
-   Филворд — арт-стиль студии «Пятница»: тёплая «бумага».
-   Кремовый фон, чернильные буквы, газетно-кроссвордный вид для аудитории 35+.
-   Вся палитра — здесь, в :root. Перекраска = смена этих значений.
-   ============================================================ */
-
 :root {
-  --bg: #f3ead6;          /* бумага */
-  --surface: #fbf5e7;     /* плитка клетки / карточка */
-  --tile-border: #e4d8bd; /* тонкая рамка плитки */
-  --text: #2b2723;        /* чернила */
-  --text-dim: #8c8273;    /* приглушённый текст */
-  --accent: #2b2723;      /* основная кнопка = чернильная */
-  --accent-ink: #f6efdd;  /* текст на основной кнопке = кремовый */
-  --accent2: #c2703c;        /* глина — текущее звено, акценты */
-  --accent2-tint: #f1ddca;   /* светлый тон под фон чипа */
-  --accent2-ink: #7a3f1d;    /* тёмный тон — текст на tint */
-  --gold: #d9a441;           /* золото — золотое слово (b20) */
-  --gold-tint: #f8e9c3;      /* светлый тон под фон золотого чипа */
-  --gold-ink: #7a5a12;       /* текст на золотом */
-  --banner-h: 0px;           /* b23: полоса под баннер площадки снизу, ставит main.js setBannerInset */
-  --radius: 14px;
+  --bg:        #f3ead6;
+  --ink:       #2b2723;
+  --ink-light: #7a6f65;
+  --accent:    #4a7c59;
+  --radius:    6px;
+  /* ТЗ №13, фаза 2 → ТЗ №14, фаза 1: узор на фоне — тон чернил темы поверх
+     бумаги. 5% (ТЗ №13) основатель счёл слишком слабым («точки появились,
+     нравится, но слишком слабо заметны») — проявленность даёт
+     непрозрачность, а не радиус/шаг сетки (те не менялись). Поднято до 9%
+     (средний из показанных 7/9/11%, см. docs/reports/2026-08-22_pattern_v2.md).
+     Формула фиксированная (--pattern-image ниже, задаётся один раз), цвет
+     пересчитан вручную под ink каждой темы (RGB чернил × 0.09 + RGB бумаги
+     × 0.91), чтобы не тянуть color-mix() ради поддержки старых webview. */
+  --pattern-dot: rgba(43, 39, 35, 0.09);
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* Задача E: косметика — другой цвет чернил, фон "тёплой бумаги" не трогаем.
+   Класс вешается на <html> (main.js applyCosmetic), а не #app, — переопределяет
+   :root для ВСЕХ экранов, включая уже отрисованные до применения. */
+html.theme-ink-blue {
+  --ink:       #1f2d4a;
+  --ink-light: #55637f;
+  --accent:    #3d6b96;
+  --pattern-dot: rgba(31, 45, 74, 0.09);
+}
+/* Задача I: ещё две гаммы «тёплой бумаги» — та же схема переменных. */
+html.theme-sepia {
+  --bg:        #ece0c8;
+  --ink:       #4a3728;
+  --ink-light: #8a6f56;
+  --accent:    #a3703f;
+  --pattern-dot: rgba(74, 55, 40, 0.09);
+}
+html.theme-graphite {
+  --bg:        #e9e7e2;
+  --ink:       #2e2e30;
+  --ink-light: #6c6c70;
+  --accent:    #55606b;
+  --pattern-dot: rgba(46, 46, 48, 0.09);
+}
+/* ТЗ №01: награда за 3-й день серии входов — своя гамма, ОБЯЗАНА
+   отличаться от трёх платных выше (бесплатная выдача не дублирует
+   ассортимент магазина, см. retention.js/main.js grantStyle).
+   ТЗ №03, Фаза 2: --ink затемнён (было #7a3b2e, контраст 157.4 — ниже
+   всех трёх платных, минимум Sepia 164.6). Тот же тон (H≈10°, тёплый
+   красно-коричневый), просто темнее — HSL(10°,45%,25%) вместо
+   HSL(10°,45%,33%), не сдвинут в сторону Sepia (H≈26°) или Graphite
+   (насыщенность ≈0%). Перезамер тем же скриптом — см. отчёт
+   docs/reports/2026-08-20_retention_prerelease.md. */
+html.theme-streak-rust {
+  --bg:        #f3ead6;
+  --ink:       #5d2d23;
+  --ink-light: #8a5a4c;
+  --accent:    #c1533c;
+  --pattern-dot: rgba(93, 45, 35, 0.09);
+}
+/* ТЗ №49: награда за 7-й день лестницы — единственная ТЁМНАЯ гамма студии
+   (--bg тёмный, не «тёплая бумага»), поэтому вместо пересчёта
+   --pattern-dot по формуле «чернила×0.09+бумага×0.91» (та формула
+   предполагает тёмные чернила на светлой бумаге — здесь наоборот) взят
+   белый узор на тёмном фоне той же прозрачности 0.09, тот же приём глазом
+   читается одинаково независимо от того, кто темнее — бумага или чернила. */
+html.theme-night {
+  --bg:        #1c1f26;
+  --ink:       #e8e6df;
+  --ink-light: #a9aab3;
+  --accent:    #8fb0ff;
+  --pattern-dot: rgba(232, 230, 223, 0.08);
+}
 
-/* Запрет браузерного скролла, свайпа-обновления и выделения текста.
-   Закрывает п.1.10.2 (нет системного скролла / swipe-to-refresh)
-   и п.1.6.1.8 / 1.6.2.7 (лонгтап не выделяет поле, нет контекстного меню). */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
 html, body {
-  margin: 0;
-  height: 100%;
+  width: 100%; height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  /* ТЗ №13, фаза 2: узор — чистый CSS (repeating-radial-gradient), без
+     файлов-ассетов и внешних запросов. Живёт на body (не на .screen —
+     у экранов нет своей заливки, они прозрачны до этого правила), поэтому
+     сам по себе виден на всех экранах разом; #game ниже перекрывает его
+     собственной сплошной заливкой — на игровом поле узора нет. Вариант —
+     самый сдержанный из 3, показанных основателю на скриншотах
+     (docs/reports/2026-08-22_polish_debts.md); точки радиусом 1px на сетке
+     28px были при рендере визуально неотличимы от чистого фона (1px
+     растеризуется в почти ничего) — это не решило бы жалобу основателя на
+     плоский фон, поэтому первая итерация (радиус 1px/28px) отклонена ДО
+     показа, крупнее круг (1.4px) и чаще сетка (22px) при тех же 5%
+     непрозрачности чернил темы (--pattern-dot) уже устойчиво видны. */
   background-color: var(--bg);
-  /* Слой 1 — мягкое свечение под курсором (центр двигает JS, на телефоне не видно).
-     Слой 2 — «бумажная» крупка, чуть плотнее прежнего, чтобы фон не был плоским.
-     Слой 3 — тонкое волокно бумаги: диагональные линии под небольшим углом
-     (не 0/90°, чтобы не читалось как экранная сетка), на грани заметности —
-     держим её тон (rgba(80,60,30,…)) той же охрой, что и крупка, никаких
-     новых цветов. Альфа линии специально мала (0.02, не 0.035, как в первой
-     версии): на редком пикселе, где крупка и линия совпадают, фон темнеет
-     сильнее всего — посчитано (WCAG, node), там контраст подписи (--text-dim)
-     ~2.9->2.7 (уже был ~2.9 ДО этого слоя — подпись изначально декоративная,
-     приглушённая; заголовок (--text) остаётся ~10.7, с огромным запасом).
-     Дальше растить альфу линии не стоит — это и так на грани "не переборщить". */
-  background-image:
-    radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 62%),
-    radial-gradient(circle, rgba(80,60,30,0.07) 1px, transparent 1.5px),
-    repeating-linear-gradient(115deg, rgba(80,60,30,0.02) 0px, rgba(80,60,30,0.02) 1px, transparent 1px, transparent 5px);
-  background-size: auto, 20px 20px, auto;
-  background-repeat: no-repeat, repeat, repeat;
-  color: var(--text);
-  font-family: Georgia, "PT Serif", "Times New Roman", serif;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: manipulation;
+  background-image: radial-gradient(circle at center, var(--pattern-dot) 1.4px, transparent 1.8px);
+  background-size: 22px 22px;
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
-/* Игра занимает всю доступную область (п.1.6.1.1 / 1.6.2.1). */
 #app {
+  width: 100%; height: 100%;
+  touch-action: none;
   position: relative;
-  width: 100%;
-  height: 100dvh;
-  overflow: hidden;
+  /* ПК-модерация (п.1.6.2.7): не даём браузеру выделять текст игровых
+     экранов ПКМ-протяжкой/тройным кликом — это отдельная защита от
+     дефолтного контекстного меню (contextmenu гасится в main.js). */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 .screen {
   position: absolute;
-  inset: 0;
-  bottom: var(--banner-h, 0px);   /* b23: экраны заканчиваются выше баннера площадки */
+  top: 0; left: 0;
+  /* ТЗ №10, фаза 1/2 (шаг B) — резерв места под ВК-баннер вместо наезда
+     поверх контента. Переменные ставит/снимает adapters/vk_bridge.js
+     (applyBannerReserve) по факту колбэков проверки/обновления/закрытия
+     баннера площадки (см. VK-адаптер — имена методов не дублируем здесь
+     буквально: build.py check_no_leak сканирует style.css как COMMON_FILE
+     и раньше на этом же тексте падал бы в яндекс-сборке, просто это
+     обнаружилось только сейчас, ТЗ №13, п.3.3 — build.py yandex до
+     pre-commit-хука на этой ветке ни разу не запускался);
+     в источнике и в яндекс-сборке переменных нет —
+     0px, .screen как раньше растянут на весь #app, поведение не меняется.
+     Явные right/bottom вместо inset:0 — сокращают собственный бокс
+     .screen (не padding предка: тот НЕ сжимает containing block
+     абсолютно спозиционированных потомков, проверено живым прогоном),
+     поэтому flex-центрирование (align-items/justify-content ниже) само
+     центрирует портретную колонку в ОСТАВШЕЙСЯ области — без правок
+     разметки экранов. safe-area (фаза 2, низ на мобиле) добавляется, а
+     не заменяет резерв. */
+  right: var(--vk-banner-reserve-right, 0px);
+  bottom: calc(var(--vk-banner-reserve-bottom, 0px) + env(safe-area-inset-bottom, 0px));
+  transition: right 0.2s ease, bottom 0.2s ease;
   display: none;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  text-align: center;
 }
 .screen.is-active { display: flex; }
 
-/* Тёплый янтарный свет на главном меню: мягкое свечение сверху (от заголовка)
-   и чуть более тёмное у основания — как от свечи на пергаменте. */
-#menu {
-  background:
-    radial-gradient(ellipse 70% 42% at 50% 12%, rgba(255, 205, 100, 0.22), transparent),
-    radial-gradient(ellipse 90% 55% at 50% 100%, rgba(190, 125, 45, 0.13), transparent);
-}
-
-/* --- Экран загрузки --- */
+/* Загрузка */
 .loader {
-  width: 44px; height: 44px;
-  border: 4px solid rgba(255,255,255,0.15);
-  border-top-color: var(--accent);
+  width: 40px; height: 40px;
+  border: 3px solid var(--ink-light);
+  border-top-color: var(--ink);
   border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { margin-top: 16px; color: var(--text-dim); font-size: 15px; }
+.loading-text { margin-top: 16px; color: var(--ink-light); font-size: 0.9rem; }
 
-/* --- Меню --- */
-.menu-head { margin-bottom: 40px; }
-.game-title { margin: 0; font-size: 40px; font-weight: 700; letter-spacing: 0.01em; }
-.game-sub { margin: 8px 0 0; color: var(--text-dim); font-size: 16px; }
-
-.menu-actions {
+/* RV-загрузка (2026-09-06, баг-репорт основателя): пока идёт реальный
+   показ Platform.showRewarded (до 40с, REWARD_AD_TIMEOUT_MS/
+   AD_HANG_TIMEOUT_MS — оба адаптера), экран раньше молча "замирал" без
+   единого признака жизни — неотличимо от зависшей игры. Явный оверлей
+   поверх ВСЕГО (z-index выше .retention-toast, единственного, что уже
+   использовало 50) — видимая причина паузы, не имитация поломки. .loader/
+   .loading-text переиспользованы как есть (экран загрузки выше) — не
+   плодим второй спиннер под другим именем. Кнопку/экран под оверлеем НЕ
+   прячем и НЕ дизейблим (п.190/шрам Color Sort про #retention-rewarded-btn
+   остаётся в силе) — просто временно перекрываем явным, понятным слоем;
+   main.js: showAdLoadingOverlay()/hideAdLoadingOverlay(), парой вокруг
+   каждого вызова Platform.showRewarded (onHintClick, onRewardedButtonClick). */
+.ad-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 320px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
 }
+.ad-loading-overlay[hidden] { display: none; }
+/* ТЗ №49: раньше border-color/color брались из var(--bg), полагаясь на то,
+   что --bg ВСЕГДА светлая «бумага» (читаемо на тёмном rgba-скриме ниже).
+   Гамма «Ночь» (theme-night) впервые сделала --bg тёмным — тот же приём
+   слил бы спиннер/текст с чёрным скримом до нечитаемости. Скрим здесь
+   фиксированный rgba(0,0,0,…), НЕ завязан на активную тему вообще —
+   поэтому и его содержимое берёт фиксированный светлый цвет, а не var(--bg). */
+.ad-loading-overlay .loader { border-color: rgba(255, 255, 255, 0.85); border-top-color: transparent; }
+.ad-loading-text { margin-top: 16px; color: #f3ead6; font-size: 0.9rem; text-align: center; padding: 0 24px; }
 
-/* Крупные тап-цели (п.1.8) — минимум 56px по высоте.
-   Иерархия: primary (Продолжить) — гуще заливка + плотнее тень, тянет взгляд;
-   secondary (Уровни) — бледнее, тонкая обводка/тень, читается как второй план.
-   Тени — в тон «чернил» (var(--text) = #2b2723 → rgba(43,39,35,…)), мягкие,
-   без резких краёв. :hover — ТОЛЬКО там, где есть настоящий указатель
-   (hover:hover и pointer:fine) — иначе на тапе он «залипает» после отпускания
-   пальца (устройство без hover try). :active — работает везде (в т.ч. на тач). */
-.btn {
-  appearance: none;
-  border: 0;
-  border-radius: var(--radius);
-  min-height: 56px;
-  padding: 0 24px;
-  font-size: 18px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.08s ease, box-shadow 0.15s ease, background-color 0.15s ease, filter 0.15s ease;
-}
-.btn-primary {
-  background: var(--accent2);
-  color: var(--accent-ink);
-  box-shadow: 0 4px 10px rgba(43,39,35,0.22);
-}
-.btn-secondary {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--tile-border);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 6px rgba(43,39,35,0.08);
-}
-@media (hover: hover) and (pointer: fine) {
-  .btn-primary:hover   { box-shadow: 0 6px 16px rgba(43,39,35,0.28); transform: translateY(-2px); }
-  .btn-secondary:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 4px 10px rgba(43,39,35,0.14); border-color: var(--accent2); transform: translateY(-1px); }
-  .sound-toggle:hover   { box-shadow: 0 3px 8px rgba(43,39,35,0.12); border-color: var(--accent2); transform: translateY(-1px); }
-}
-.btn:active { transform: scale(0.97); }
-.btn-primary:active   { box-shadow: 0 2px 6px rgba(43,39,35,0.18); filter: brightness(0.93); }
-.btn-secondary:active { box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 1px 3px rgba(43,39,35,0.08); background: var(--accent2-tint); }
-
-.sound-toggle {
-  position: absolute;
-  top: max(16px, env(safe-area-inset-top));
-  right: 16px;
-  width: 44px; height: 44px;
-  border: 1px solid var(--tile-border);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 20px;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(43,39,35,0.08);
-  transition: transform 0.08s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-}
-.sound-toggle.is-muted { color: var(--text-dim); }
-.sound-toggle:active { transform: scale(0.92); background: var(--accent2-tint); box-shadow: 0 1px 3px rgba(43,39,35,0.06); }
-
-.dev-badge {
-  position: absolute;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  left: 0; right: 0;
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-/* Плашка номера билда (стандарт с 2026-07-25). Живёт СНАРУЖИ #app в
-   разметке (см. index.html) — не элемент игры, а метка сборки для
-   основателя. Неинтерактивна, низкая непрозрачность, не мешает
-   контролам (у них другой bottom-отступ и центр/право экрана). */
-#build-badge {
+/* Debug-оверлей (2026-09-06, ?debug=1) — z-index выше .ad-loading-overlay
+   (60), чтобы строки лога были видны, даже пока идёт ожидание рекламы.
+   Тёмный монохромный стиль намеренно НЕ похож на бумажную тему игры —
+   сразу видно, что это служебная панель, не часть UI.
+   БАГ (2026-09-07, живой скриншот основателя): панель до 42vh высотой
+   перекрывала боевые кнопки внизу экрана (#btn-hint, #retention-rewarded-btn)
+   — инструмент диагностики ломал ровно тот сценарий, который должен
+   измерять. pointer-events:none на контейнере — тапы проходят СКВОЗЬ
+   панель к настоящим кнопкам под ней, независимо от того, насколько
+   панель разрослась; auto возвращён только кнопке очистки. */
+.debug-overlay {
   position: fixed;
-  left: max(6px, env(safe-area-inset-left));
-  bottom: calc(var(--banner-h, 0px) + max(3px, env(safe-area-inset-bottom)));
-  margin: 0;
-  color: var(--text-dim);
-  font-family: monospace, monospace;
-  font-size: 9px;
-  line-height: 1.2;
-  opacity: 0.35;
-  pointer-events: none;
-  user-select: none;
-  z-index: 5;
-}
-
-/* ============================================================
-   Фаза 1 — игровой экран и поле. Те же CSS-переменные, что и меню,
-   поэтому перекраска позже = смена значений в :root, не правка логики.
-   ============================================================ */
-
-/* b22: игровой экран собран ПОТОКОМ (flex-колонка), а не абсолютными
-   отступами: шапка → лента запаса → поле (всё, что осталось) → подсказка
-   первого уровня → цепочка слов → кнопка. До b22 поле и список стояли на
-   фиксированных bottom-отступах (188/84 px): цепочка из 7–8 слов (главы
-   8–10) в 3–4 строки упиралась в поле, а на ≤360px под поле уходила и
-   вторая строка ленты запаса (замечание основателя по b21 в ВК, 13.09).
-   Теперь поле ужимается под остаток высоты — Board.fit читает размеры
-   обёртки. Оверлеи и перелёт ⚡ остаются absolute/fixed — они вне потока. */
-#game.screen {
+  left: 0; right: 0; bottom: 0;
+  max-height: 42vh;
+  z-index: 70;
+  display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  padding: 0 0 max(14px, env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.85);
+  font-family: monospace;
+  pointer-events: none;
 }
-
-/* b23: шапка и лента ниже (54 px, кнопки 40) — игровой экран компактнее
-   под постоянный баннер снизу (решение основателя 13.09). */
-.game-head {
-  position: relative;
-  flex: 0 0 auto;
-  height: 54px;
+.debug-overlay[hidden] { display: none; }
+.debug-overlay-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
-  padding-top: max(8px, env(safe-area-inset-top));
-}
-.game-head-center { flex: 1; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
-.game-level { font-size: 14px; font-weight: 600; }
-.game-theme { color: var(--text-dim); font-size: 12px; }
-.game-counter { color: var(--text); font-size: 15px; min-width: 48px; text-align: right; }
-
-.icon-btn {
-  width: 40px; height: 40px;
-  border: 1px solid var(--tile-border); border-radius: 50%;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 24px; line-height: 1;
-  cursor: pointer;
-}
-.icon-btn:active { transform: scale(0.96); }
-
-/* Область под поле: забирает всю высоту между лентой запаса и списком
-   слов (flex: 1). min-height: 0 обязателен — иначе flex-ребёнок не
-   ужимается и поле снова легло бы на список. Отступы — часть обёртки,
-   Board.fit их вычитает (поле не выезжает за контентную область). */
-.board-wrap {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 0;
-  margin-top: auto;     /* b23: остаток высоты (когда поле упёрлось в потолок клетки) делится над полем и под кнопкой */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 16px;
-}
-
-/* Список слов уровня: над кнопкой подсказки. */
-.howto {
-  flex: 0 0 auto;
-  margin: 0 0 4px;
-  padding: 0 8px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 14px;
-}
-
-.word-list {
-  flex: 0 0 auto;
-  max-height: 34vh;         /* страховка для очень низких экранов: список прокручивается, поле не схлопывается */
-  margin: 0 0 6px;
-  padding: 2px 12px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-content: flex-start;
-  gap: 5px;
-  overflow-y: auto;
-}
-.word-chip {
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 8px;
-  padding: 3px 9px;
-  font-size: 14px;
-  color: var(--text);
-  letter-spacing: 0.03em;
-}
-.word-chip.found {
-  text-decoration: line-through;
-  color: var(--text-dim);
-}
-.word-chip.current {
-  background: var(--accent2-tint);
-  border: 2px solid var(--accent2);
-  color: var(--accent2-ink);
-  font-weight: 700;
-}
-.chain-sep {
-  color: var(--text-dim);
-  font-size: 13px;
-  align-self: center;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.05em;
   flex-shrink: 0;
 }
-
-/* b20: золотое слово — одно на уровне, даёт +1 к запасу (main.js, GOLD_LEVELS).
-   Золото видно и когда чип текущий: заливка золотая, рамка глиняная. */
-.word-chip.gold {
-  background: var(--gold-tint);
-  border: 2px solid var(--gold);
-  color: var(--gold-ink);
-  font-weight: 700;
+.debug-clear-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+  pointer-events: auto;
 }
-.word-chip.gold::before { content: '⚡'; margin-right: 3px; font-size: 12px; }
-.word-chip.gold.current { border-color: var(--accent2); }
-/* b22: фаза 1 золотого слова (main.js burstChip) — чип держит золотой вид без
-   зачёркивания и поднимается над соседями, пока разрастается; само движение —
-   в блоке motion ниже. */
-.word-chip.gold-burst {
+.debug-log {
+  overflow-y: auto;
+  padding: 4px 10px 8px;
+  color: #7cfc7c;
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.debug-log > div { border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding: 2px 0; }
+/* Финальный исход showRewarded (2026-09-07) — крупнее и заметнее строк
+   ожидания, чтобы не потеряться среди одинаковых "жду ответа моста: …". */
+.debug-log-final {
+  font-size: 14px;
+  font-weight: bold;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  padding: 4px 4px !important;
+}
+
+/* Меню */
+.menu-head { text-align: center; margin-bottom: 48px; }
+.game-title { font-size: 2.6rem; font-weight: normal; margin: 8px 0 6px; }
+.game-sub { color: var(--ink-light); font-size: 0.95rem; }
+
+.menu-actions { display: flex; flex-direction: column; gap: 12px; width: 200px; }
+
+.btn {
+  padding: 14px 24px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink);
+  transition: background 0.15s, color 0.15s;
+}
+.btn-primary { background: var(--ink); color: var(--bg); }
+.btn-primary:active { opacity: 0.8; }
+.btn-secondary:active { background: var(--ink); color: var(--bg); }
+#btn-daily.is-done { opacity: 0.5; }
+
+/* Стрик + кнопка календаря */
+.daily-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-top: 4px;
+}
+.daily-streak {
+  font-size: 0.85rem;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.cal-icon-btn {
+  font-size: 1rem;
+  color: var(--ink-light);
+  padding: 2px 6px;
+}
+
+/* ---- ТЗ №01: модуль удержания (только ВК-сборка, узлы вставляет
+   build.py transform_index_html_vk — в общем index.html их нет) ---- */
+
+/* Постоянная строка — не модалка, не перекрывает кнопки (п. приёмки:
+   видна целиком на 320px, в т.ч. горизонтально). */
+.retention-line {
+  font-size: 0.8rem;
+  color: var(--ink-light);
+  text-align: center;
+  max-width: 280px;
+  line-height: 1.3;
+}
+#retention-streak-line { margin-top: 6px; }
+#retention-drip-line   { margin-bottom: 8px; }
+
+/* ТЗ №09, фаза 3 — rewarded «Открыть ещё +N», рядом со строкой раздатчика.
+   Меньше и тише основной кнопки «Играть» — вторична по иерархии. */
+.retention-rewarded-btn {
+  display: block;
+  margin: 0 auto 16px;
+  font-size: 0.85rem;
+  padding: 8px 16px;
+  min-height: 34px;
+}
+/* ТЗ №12: без этого правила атрибут [hidden] (renderRewardedButton(),
+   конец кампании — открывать больше нечего) проигрывает по порядку
+   каскада безусловному display:block выше — на экране оставалась пустая
+   нефункциональная кнопка вместо её исчезновения (тот же класс дефекта,
+   что у .daily-meta, см. build.py transform_index_html_vk). */
+.retention-rewarded-btn[hidden] { display: none; }
+
+/* ТЗ (RV-значок, Яндекс 4.5.1, усиление 2026-09-06): значок «экран +
+   треугольник» на обеих RV-точках (эта кнопка + #btn-hint, см.
+   .hint-icon-wrap ниже) — рядом с текстом, тем же var(--accent), что и
+   остальной акцент студии, чтобы не потеряться ни в одной из 4
+   косметических тем магазина (Задача I). Инлайн-flex обёртка вместо flex
+   на самой кнопке — сохраняет её auto-ширину/центрирование (margin:0 auto
+   выше рассчитан на shrink-to-fit кнопки, не на flex-контейнер). */
+.rv-btn-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ad-icon {
+  flex: none;
+  color: var(--accent);
+}
+.ad-icon rect { fill: none; stroke: currentColor; stroke-width: 1.3; }
+.ad-icon path { fill: currentColor; }
+
+/* ТЗ №26, Р7 (26.08): на 568×320 (самая низкая рабочая ширина студии)
+   строка раздатчика, строка пазла дня и кнопка «Магазин» уходили за
+   нижний край — html/body не скроллятся (overflow:hidden выше), то есть
+   были физически недостижимы, не просто «нужно прокрутить» (Этап 4,
+   docs/reports/2026-08-26_ТЗ26_этап4_кадры.md). Решение основателя —
+   вариант A: сжать вертикальные отступы МЕНЮ на низких viewport, ничего
+   не прятать (вариант B — прятать строку раздатчика — отклонён как
+   повторный откат к отверженному «невидимая механика не удерживает»).
+   400px — по матрице ширин студии это ловит только 568×320 (высота 320);
+   у остальных трёх ширин высота 600px, не задета. Общий style.css —
+   правка задевает и ВК (тот же брейкпоинт, то же меню), это ожидаемо
+   и сверено diff'ом с боевым v43 в отчёте Этапа 4б. */
+@media (max-height: 400px) {
+  .menu-head { margin-bottom: 8px; }
+  .menu-actions { gap: 4px; }
+  .menu-actions .btn { padding: 8px 24px; }
+  #retention-streak-line { margin-top: 2px; }
+  .daily-meta { margin-top: 2px; min-height: 22px; }
+}
+
+.chapter-card.is-locked {
+  opacity: 0.55;
+}
+.chapter-card.is-locked .chapter-head-btn { cursor: pointer; }
+
+/* Всплывающий отклик на выдачу награды (п.2.4) — короткий, ненавязчивый,
+   сам прячется, не блокирует ввод (не overlay/модалка). */
+.retention-toast {
+  position: absolute;
+  left: 50%; top: 14px;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 8px 16px;
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  text-align: center;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.retention-toast.is-visible { opacity: 1; }
+
+/* Кнопка звука */
+#btn-sound-menu {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+#btn-sound-game {
+  margin-left: auto;   /* прижимает кнопку к правому краю шапки */
+}
+.sound-btn {
   position: relative;
-  z-index: 5;
-  text-decoration: none;
-  background: var(--gold-tint);
-  border-color: var(--gold);
-  color: var(--gold-ink);
+  font-size: 1.3rem;
 }
-/* Перелёт ⚡ и «+1»: fixed, координаты ставит main.js; движение — в блоке motion ниже. */
-.energy-fly {
-  position: fixed; left: 0; top: 0; z-index: 60;
-  font-size: 26px; line-height: 1;
-  pointer-events: none;
-  will-change: transform;
-}
-.energy-fly[hidden] { display: none; }
-.energy-plus {
-  position: fixed; left: 0; top: 0; z-index: 60;
-  font-weight: 700; font-size: 18px; line-height: 1;
-  color: var(--gold-ink);
+.sound-btn.is-muted::after {
+  content: '';
+  position: absolute;
+  inset: 4px 8px;     /* совпадает с padding icon-btn, черта идёт сквозь символ */
+  background: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 1px),
+    var(--ink)        calc(50% - 1px),
+    var(--ink)        calc(50% + 1px),
+    transparent       calc(50% + 1px)
+  );
   pointer-events: none;
 }
-.energy-plus[hidden] { display: none; }
-.energy-icon { display: inline-block; }
-/* b20: строка «следующее обновление» — на победе последнего уровня и в меню. */
-.win-more { margin: 0 0 12px; font-size: 14px; color: var(--accent2-ink); }
-.win-more[hidden] { display: none; }
-.menu-more { color: var(--accent2-ink); }
-.menu-more[hidden] { display: none; }
 
-/* Сетка. Размер задаётся из JS (Board.fit), клетки тянутся через 1fr. */
-.board {
+/* Dev-бейдж */
+.dev-badge {
+  position: absolute; bottom: 16px;
+  font-size: 0.75rem;
+  color: var(--ink-light);
+}
+
+/* Задача F: подпись версии/билда — не UI-элемент, только для основателя.
+   Вне .screen (см. index.html), поэтому видна поверх любого активного
+   экрана, включая оверлеи (z-index выше .overlay). */
+.build-tag {
+  position: absolute;
+  left: max(8px, env(safe-area-inset-left));
+  /* ТЗ №10: .build-tag живёт ВНЕ .screen (см. комментарий выше) — резерв
+     .screen на bottom (мобильный баннер) его не задевает автоматически,
+     как задевает всё остальное внутри .screen. Тот же --vk-banner-
+     reserve-bottom нужен и здесь явно, иначе плашка окажется под
+     баннером — ровно то, что это ТЗ и просило не допустить. */
+  bottom: calc(max(8px, env(safe-area-inset-bottom)) + var(--vk-banner-reserve-bottom, 0px));
+  transition: bottom 0.2s ease;
+  font-size: 0.65rem;
+  color: var(--ink-light);
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+  z-index: 20;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader { animation: none; }
+}
+
+/* ---- Экран глав («Альбом», ТЗ №50) ---- */
+
+/* 13 карточек глав не помещаются без скролла на низких экранах (320×568 и
+   меньше, тем более на высоких — с рядами миниатюр внутри каждой). Тот же
+   приём, что уже был у экрана категорий (Задача K) и у #shop: список сам
+   не по центру, а сверху, с прокруткой и отступом, чтобы не залезать под
+   back-button. */
+#chapters {
+  justify-content: flex-start;
+  overflow-y: auto;
+  padding: 56px 0 24px;
+}
+
+.cat-back-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.cat-screen-title {
+  font-size: 1.4rem;
+  font-weight: normal;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(320px, 88vw);
+}
+
+.chapter-card {
+  width: 100%;
+  padding: 12px 16px 14px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.chapter-head-btn {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chapter-name {
+  font-size: 0.95rem;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.chapter-progress {
+  font-size: 0.8rem;
+  color: var(--ink-light);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+.chapter-progress.is-done { color: var(--accent); }
+
+.postcard-badge {
+  font-size: 0.85rem;
+  margin-left: 4px;
+}
+
+.chapter-locked-line {
+  font-size: 0.78rem;
+  color: var(--ink-light);
+  line-height: 1.4;
+}
+
+.chapters-ahead {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--ink-light);
+  text-align: center;
+}
+
+.chapter-thumbs {
   display: grid;
-  gap: 5px;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 4px;
+}
+/* 568×320 и уже — два ряда по 5 (ТЗ №50, п.4). */
+@media (max-width: 400px) {
+  .chapter-thumbs { grid-template-columns: repeat(5, 1fr); }
 }
 
-/* Клетка-буква. Крупная тап-цель (п.1.8); b23 — компактнее (радиус 8,
-   шрифт до 36, потолок размера клетки в Board.fit). */
-.cell {
+.thumb {
+  aspect-ratio: 1;
+  border: 1.5px solid var(--ink-light);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 8px;
-  font-size: clamp(18px, 6.5vmin, 36px);
-  font-weight: 600;
-  aspect-ratio: 1 / 1;
+  padding: 1px;
+  min-width: 0;
+}
+.thumb-canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+}
+.thumb-num {
+  font-size: 0.72rem;
+  color: var(--ink-light);
+  pointer-events: none;
+}
+.thumb.is-open {
+  border-color: var(--ink);
+}
+.thumb.is-open .thumb-num { color: var(--ink); }
+.thumb.is-done {
+  border-color: var(--accent);
+}
+.thumb.is-locked {
+  border-style: dashed;
+  cursor: pointer;
+}
+.thumb-dot { opacity: 0.5; }
+
+.chapter-howto-btn {
+  align-self: flex-start;
+  margin-top: -2px;
+  font-size: 0.78rem;
+  color: var(--ink-light);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  text-align: left;
 }
 
-/* Состояния клеток при вводе + цветовая обратная связь. */
-.board { touch-action: none; }            /* свайп не прокручивает страницу */
-.cell { transition: background-color 0.12s ease, color 0.12s ease; }
-.cell.active { background: #2f6fed; color: #fff; border-color: #2f6fed; }   /* синий — ведём */
-.cell.found  { background: #2e9e5b; color: #fff; border-color: #2e9e5b; }   /* зелёный — подтверждено */
-.cell.wrong  { background: #d64545; color: #fff; border-color: #d64545; }   /* красный — неверно (вспышка) */
-.cell.nudge  { box-shadow: inset 0 0 0 3px var(--accent2); }                 /* глина — «начни отсюда» */
+/* ---- Экран игры ---- */
 
-/* Фаза 3 — оверлей победы. */
+#game {
+  align-items: stretch;
+  justify-content: flex-start;
+  /* ТЗ №14, фаза 2: раньше здесь была сплошная заливка var(--bg), которая
+     гасила узор на ВСЁМ игровом экране (в т.ч. шапку и поля вокруг доски) —
+     основатель указал, что это лишнее: узор нужен вокруг доски, как и на
+     остальных экранах, узор body просвечивает здесь без изменений. Только
+     сама доска непрозрачна — см. .puzzle ниже, её граница = граница
+     заливки, никакой лишней "наклейки". */
+}
+
+.game-head {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 12px;
+  gap: 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ink-light);
+}
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+.level-label { font-size: 0.9rem; color: var(--ink-light); }
+
+.puzzle-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  overflow: hidden;
+}
+
+/* ---- Головоломка (CSS Grid 2×2) ---- */
+
+.puzzle {
+  display: grid;
+  grid-template-areas: "tl   cols"
+                       "rows grid";
+  grid-template-columns: var(--clue-col-w) auto;
+  grid-template-rows: auto auto;
+  touch-action: none;
+  /* ТЗ №14, фаза 2: доска (числа-подсказки + сетка клеток) — непрозрачная
+     подложка, узор на ней мешал бы читаемости сетки (регресс ТЗ №13
+     сохраняется). Фон именно на .puzzle (не на .puzzle-container с его
+     padding:12px вокруг) — грид занимает ровно свой контент без отступов,
+     поэтому край заливки в точности совпадает с краем доски, без эффекта
+     "наклейки". */
+  background: var(--bg);
+}
+
+.puzzle-tl       { grid-area: tl; }
+.puzzle-col-clues { grid-area: cols; display: flex; }
+.puzzle-row-clues { grid-area: rows; display: flex; flex-direction: column; }
+.puzzle-grid     { grid-area: grid; }
+
+/* Подсказки столбцов: числа выровнены по нижнему краю */
+.col-clue {
+  width: var(--cell);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 6px;
+}
+.col-clue span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+/* Задача G: строка/столбец закрыты — подсказка бледнеет (прогресс без цифр) */
+.col-clue.is-closed span {
+  opacity: 0.3;
+  transition: opacity 0.2s ease-out;
+}
+
+/* Подсказки строк: числа выровнены по правому краю */
+.row-clue {
+  height: var(--cell);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  padding-right: 6px;
+}
+.row-clue span {
+  font-size: 13px;
+  color: var(--ink);
+}
+.row-clue.is-closed span {
+  opacity: 0.3;
+  transition: opacity 0.2s ease-out;
+}
+
+/* Сетка */
+.puzzle-grid {
+  display: flex;
+  flex-direction: column;
+  border-top: 1.5px solid var(--ink);
+  border-left: 1.5px solid var(--ink);
+  touch-action: none;
+}
+.grid-row { display: flex; }
+.grid-cell {
+  width: var(--cell);
+  height: var(--cell);
+  border-right: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  background: var(--bg);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  cursor: pointer;
+}
+
+/* Состояния клетки */
+.grid-cell.is-filled {
+  background: var(--ink);
+  animation: cell-stamp 90ms ease-out;
+}
+.grid-cell.is-cross::after {
+  content: '×';
+  font-size: calc(var(--cell) * 0.48);
+  color: var(--ink-light);
+  line-height: 1;
+  pointer-events: none;
+}
+.grid-cell.is-cross {
+  animation: cell-stamp 90ms ease-out;
+}
+
+/* Задача G: микро-штамп + "чернильная заливка" вместо мгновенной клетки */
+@keyframes cell-stamp {
+  from { transform: scale(0.85); opacity: 0.4; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* Задача G: ошибка, вскрытая подсказкой — короткий шейк, без красного */
+.grid-cell.is-shake {
+  animation: cell-shake 120ms ease-in-out;
+}
+@keyframes cell-shake {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-6px); }
+  75%      { transform: translateX(6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-cell.is-filled,
+  .grid-cell.is-cross,
+  .grid-cell.is-shake {
+    animation: none;
+  }
+  .row-clue.is-closed span,
+  .col-clue.is-closed span {
+    transition: none;
+  }
+}
+
+/* ---- Подсказка на первом уровне ---- */
+
+.level-hint {
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--ink-light);
+  padding: 0 16px 6px;
+  flex-shrink: 0;
+  animation: fade-in 0.6s ease both;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .level-hint { animation: none; }
+}
+
+/* ---- Онбординг ---- */
+
+.onboarding-card {
+  margin: auto;   /* ТЗ №53: "safe"-центрирование, см. комментарий у .overlay */
+  background: var(--bg);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 88vw;
+  animation: card-pop 0.20s ease-out both;
+}
+.onboarding-title {
+  font-size: 1.1rem;
+  font-weight: normal;
+  color: var(--ink);
+}
+.onboarding-text {
+  font-size: 0.88rem;
+  color: var(--ink-light);
+  text-align: center;
+  line-height: 1.5;
+  max-width: 260px;
+}
+
+/* ---- Подтверждение (очистка поля и т.п.) ---- */
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* ---- ТЗ №49: карточка лестницы 7 дней (#ladder-card, по образцу
+   .onboarding-card) ---- */
+.ladder-card-inner {
+  max-width: 300px;
+}
+.ladder-card-day {
+  font-size: 0.85rem;
+  color: var(--ink-light);
+  text-align: center;
+  margin-top: -6px;
+}
+.ladder-strip {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+.ladder-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border: 1.5px solid var(--ink-light);
+  border-radius: 4px;
+  color: var(--ink-light);
+}
+.ladder-cell-num { font-size: 0.66rem; line-height: 1; }
+.ladder-cell-icon { font-size: 0.8rem; line-height: 1; }
+.ladder-cell.is-done {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ladder-cell.is-current {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: bold;
+}
+
+/* ТЗ №53: обёртка правой колонки .win-card. display:contents на обычных
+   высотах — не влияет на раскладку (дети остаются прямыми flex-item'ами
+   .win-card, gap/центрирование как раньше); на @media(max-height:400px)
+   ниже становится собственной flex-колонкой для раскладки в два столбца. */
+.win-card-right { display: contents; }
+
+/* ---- ТЗ №49: тизер завтрашней картинки дня (экран победы) ---- */
+.win-tomorrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.win-tomorrow-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border: 1.5px solid var(--ink-light);
+  border-radius: 3px;
+  display: block;
+}
+.win-tomorrow-canvas.is-blurred {
+  filter: blur(3px);
+}
+.win-tomorrow-label {
+  font-size: 0.72rem;
+  color: var(--ink-light);
+  text-align: center;
+}
+
+/* Наглядный пример «3 1» */
+.how-example {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+.how-clue {
+  font-size: 1rem;
+  color: var(--ink);
+  min-width: 28px;
+  text-align: right;
+}
+.how-cells {
+  display: flex;
+  gap: 3px;
+}
+.how-cell {
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--ink);
+  border-radius: 2px;
+  background: var(--bg);
+}
+.how-cell.filled {
+  background: var(--ink);
+}
+
+/* ---- Победный оверлей ---- */
+
 .overlay {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
   justify-content: center;
-  background: rgba(0,0,0,0.55);
-  z-index: 50;
-}
-.overlay[hidden] { display: none; }
-.overlay-card {
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 28px 24px;
-  text-align: center;
-  width: min(86%, 320px);
-}
-.overlay-title { margin: 0 0 12px; font-size: 22px; font-weight: 700; }
-.overlay-card .btn { width: 100%; }
-.win-score { font-size: 28px; font-weight: 700; margin: 0 0 2px; color: var(--text); }
-.win-best  { font-size: 14px; color: var(--text-dim); margin: 0 0 14px; }
-.win-new   { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent2-ink); background: var(--accent2-tint); border: 1px solid var(--accent2); border-radius: 20px; padding: 3px 12px; margin: 0 0 14px; }
-.win-new[hidden] { display: none; }
-.lv-total  { margin-left: auto; font-size: 13px; color: var(--text-dim); }
-
-/* Фаза 5 — подсказка. */
-.cell.hint { box-shadow: inset 0 0 0 3px #f59e0b; }  /* янтарная рамка = подсказанная буква */
-/* ЭТАП 3: позиционирование переехало с кнопки на ОБЁРТКУ — бейдж
-   остатка бесплатных подсказок должен висеть у угла кнопки, а у
-   absolute-кнопки нет собственной системы координат для потомка. */
-.hint-wrap {
-  position: relative;
-  flex: 0 0 auto;
-  align-self: center;
-  margin-bottom: auto;   /* b23: вторая половина остатка — под кнопкой, подальше от баннера */
-}
-.hint-btn {
-  border: 0;
-  border-radius: var(--radius);
-  min-height: 44px;
-  padding: 0 18px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid var(--tile-border);
-}
-.hint-btn:active { transform: scale(0.98); }
-
-/* Бейдж бесплатных подсказок (награда серии входов). Скрыт при нуле —
-   пустой кружок «0» читался бы как поломка, а не как отсутствие. */
-.hint-bonus-badge {
-  position: absolute;
-  top: -9px;
-  right: -9px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 11px;
-  background: var(--accent2);
-  color: var(--accent-ink);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 22px;
-  text-align: center;
-  box-shadow: 0 1px 3px rgba(43,39,35,0.25);
-}
-.hint-bonus-badge[hidden] { display: none; }
-
-/* ============================================================
-   МОДУЛЬ УДЕРЖАНИЯ (ЭТАП 3): запас, серия, стена.
-   Одна разметка .energy-row живёт в трёх местах (меню, игровой экран,
-   стена) — здесь только раскладка, числа и тексты ставит main.js.
-   Новых цветов не заводим: всё из :root (тёплая бумага).
-   ============================================================ */
-.energy-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  width: 100%;
-  max-width: 360px;
-  margin: 0 0 18px;
-  font-size: 14px;
-  color: var(--text-dim);
-}
-.energy-icon { font-size: 15px; filter: grayscale(0.15); }
-.energy-value {
-  font-weight: 700;
-  font-size: 16px;
-  color: var(--text);
-  white-space: nowrap;
-}
-.energy-line { flex: 1 1 100%; }
-
-/* На игровом экране строка идёт тонкой лентой под шапкой: одна строка,
-   без переноса — вертикаль там нужна полю, а не тексту. */
-.energy-row-game {
-  position: relative;          /* b23: якорь для попапа .energy-pop */
-  flex: 0 0 auto;
-  margin: 0 0 2px;
-  padding: 0 12px;
-  max-width: none;
-  flex-wrap: nowrap;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-.energy-row-game .energy-value { font-size: 14px; }
-/* b23 (решение основателя 13.09): на игровом экране строка «Хватит на … ·
-   +10 в …» не помещалась на телефоне и занимала высоту — теперь она
-   спрятана за «?» рядом со счётчиком и открывается всплывающей карточкой
-   (main.js setEnergyPop; плавность — в блоке motion). */
-.energy-help {
-  width: 22px; height: 22px; padding: 0;
-  border: 1px solid var(--tile-border); border-radius: 50%;
-  background: var(--surface); color: var(--text-dim);
-  font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1;
-  cursor: pointer; flex-shrink: 0;
-}
-.energy-help[aria-expanded="true"] { background: var(--accent2-tint); border-color: var(--accent2); color: var(--accent2-ink); }
-.energy-pop {
-  position: absolute;
-  left: 12px; top: calc(100% + 6px);
-  z-index: 30;
-  width: min(calc(100% - 24px), 340px);
-  padding: 10px 12px;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 22px rgba(43,39,35,0.16);
-  visibility: hidden; opacity: 0; transform: translateY(-4px);
-}
-.energy-pop.open { visibility: visible; opacity: 1; transform: none; }
-.energy-pop p { margin: 0; font-size: 13px; line-height: 1.35; white-space: normal; }
-.energy-pop .energy-line { color: var(--text); font-weight: 600; }
-.energy-pop .energy-rule { color: var(--text-dim); margin-top: 4px; }
-
-.streak-line {
-  margin: -8px 0 18px;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-
-/* --- Стена: запас на нуле --- */
-#energy-wall {
-  justify-content: flex-start;
-  padding: 0;
-}
-.wall-box {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  max-width: 380px;
-  margin: 0 auto;
-  padding: 0 24px max(24px, env(safe-area-inset-bottom));
-}
-.wall-icon {
-  font-size: 44px;
-  line-height: 1;
-  opacity: 0.75;
-  margin-bottom: 4px;
-}
-/* На стене строка состояния и вторая молния не нужны: то же самое
-   крупно говорит заголовок стены, а дубль читается как ошибка рендера.
-   Остаётся только счёт запаса — 0 из 15. */
-.energy-row-wall { margin-bottom: 2px; }
-.energy-row-wall .energy-line { display: none; }
-.energy-row-wall .energy-icon { display: none; }
-.wall-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-.wall-text {
-  margin: 0;
-  font-size: 15px;
-  color: var(--text);
-}
-.wall-sub {
-  margin: 0 0 10px;
-  font-size: 13px;
-  color: var(--text-dim);
-  line-height: 1.35;
-}
-.wall-box .btn { width: 100%; max-width: 300px; }
-
-/* --- Тост наград модуля --- */
-.retention-toast {
-  position: fixed;
-  left: 50%;
-  top: max(14px, env(safe-area-inset-top));
-  transform: translate(-50%, -12px);
-  z-index: 40;
-  max-width: 88vw;
-  padding: 10px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--tile-border);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  box-shadow: 0 4px 14px rgba(43,39,35,0.18);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.28s ease, transform 0.28s ease;
-}
-.retention-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
-.retention-toast[hidden] { display: none; }
-
-@media (prefers-reduced-motion: reduce) {
-  .retention-toast { transition: none; }
-}
-
-/* ============================================================
-   b19 — КАЛЕНДАРЬ ВОЗВРАЩЕНИЙ. Ячейки — плитки в стиле поля: тот же
-   --surface/--tile-border, «получено» — зелёная как найденная клетка,
-   «сегодня» — глиняная рамка как текущее звено. Новых цветов нет.
-   7 ячеек по 32px + зазоры = 260px — влезает в карточку 320px с
-   полями 24px и в узкий экран 320px (карточка 86% = 275px).
-   ============================================================ */
-.cal-row {
-  display: flex;
-  justify-content: center;
-  gap: 5px;
-  margin: 14px 0 12px;
-}
-.cal-cell {
-  width: 32px; height: 42px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 8px;
-  color: var(--text-dim);
-}
-.cal-day { font-size: 10px; line-height: 1; }
-.cal-val { font-size: 12px; font-weight: 700; line-height: 1; color: var(--text); white-space: nowrap; }
-.cal-cell.is-done { background: #2e9e5b; border-color: #2e9e5b; color: rgba(255,255,255,0.8); }
-.cal-cell.is-done .cal-val { color: #fff; }
-.cal-cell.is-today { border: 2px solid var(--accent2); background: var(--accent2-tint); color: var(--accent2-ink); }
-.cal-cell.is-today .cal-val { color: var(--accent2-ink); }
-.daily-reward { margin: 0 0 14px; font-size: 22px; font-weight: 700; line-height: 1.25; }
-.daily-tomorrow { margin: 12px 0 0; font-size: 13px; color: var(--text-dim); }
-
-/* b19 — строка «осталось N новых уровней» на экране победы. */
-.win-energy { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); }
-.win-energy[hidden] { display: none; }
-
-/* b19 — второй шаг туториала: два чипа цепочки, как в списке слов. */
-.tut-chain { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0 0 8px; }
-
-/* Узкий экран (320px): строка запаса на игровом экране переносится под
-   число, иначе многоточие съедает всё сообщение. */
-@media (max-width: 360px) {
-  .wall-title { font-size: 19px; }
-}
-
-/* Фаза 6 — анимации (тряска ошибки, празднование победы, конфетти). */
-@keyframes shake {
-  10%,90% { transform: translateX(-2px); }
-  20%,80% { transform: translateX(4px); }
-  30%,50%,70% { transform: translateX(-6px); }
-  40%,60% { transform: translateX(6px); }
-}
-.board.shake { animation: shake 0.32s ease; }
-
-@keyframes pop {
-  0% { transform: scale(0.85); opacity: 0; }
-  60% { transform: scale(1.04); opacity: 1; }
-  100% { transform: scale(1); }
-}
-.overlay-card.pop { animation: pop 0.35s ease; }
-
-.confetti {
-  position: absolute;
-  top: -12px;
-  width: 8px; height: 8px;
-  border-radius: 2px;
-  animation: fall var(--fall-dur, 2.4s) ease-in forwards;
-}
-@keyframes fall {
-  to { transform: translateY(520px) rotate(540deg); opacity: 0; }
-}
-
-/* Туториал — мини-демо поля с анимированным путём. */
-.tut-demo {
-  display: grid;
-  grid-template-columns: repeat(2, 48px);
-  gap: 6px;
-  margin: 16px auto 14px;
-  width: fit-content;
-}
-.tut-cell {
-  width: 48px; height: 48px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 10px;
-  font-size: 20px; font-weight: 600;
-}
-.tut-cell.tut-empty { background: transparent; border-color: transparent; }
-.tut-cell.tut-path { animation: tut-seq 2.8s ease infinite; }
-.tut-text { font-size: 15px; margin: 0 0 20px; line-height: 1.45; }
-
-/* Ячейка: сначала обычная → потом синяя (ведём) → потом зелёная (найдено). */
-@keyframes tut-seq {
-  0%, 18%  { background: var(--surface); color: var(--text); border-color: var(--tile-border); }
-  26%, 58% { background: #2f6fed; color: #fff; border-color: #2f6fed; }
-  68%, 100%{ background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
-}
-
-/* Уважение к настройке «меньше движения». */
-@media (prefers-reduced-motion: reduce) {
-  .board.shake, .overlay-card.pop, .confetti { animation: none; }
-  .tut-cell.tut-path { animation: none; background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
-  /* При heartbeat-классе без анимации — краткая инверсия цвета чипа (акцент считывается). */
-  .word-chip.current.heartbeat { background: var(--accent2); border-color: var(--accent2); color: #f6efdd; }
-}
-
-/* Новые анимации — только если пользователь не просил убрать движение. */
-@media (prefers-reduced-motion: no-preference) {
-  /* Появление поля: плитки выезжают каскадом снизу с fade-in. */
-  @keyframes cell-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: none; }
-  }
-  .cell { animation: cell-in 220ms ease both; }
-
-  /* Нахождение слова: чип «пыхает» масштабом. */
-  @keyframes chip-pop {
-    0%   { transform: scale(1); }
-    45%  { transform: scale(1.08); }
-    100% { transform: scale(1); }
-  }
-  .word-chip.pop { animation: chip-pop 180ms ease; }
-
-  /* b20 → b22: золотое слово в ДВЕ фазы (main.js claimGoldWord → burstChip →
-     flyEnergy; решение основателя 13.09 — «ярче»). Фаза 1: чип внизу
-     разрастается до 1,45× с золотым свечением (GOLD_BURST_MS = 420 мс) и
-     остаётся крупным. Фаза 2: ⚡ стартует полуторным от чипа и 700 мс летит к
-     счётчику, сжимаясь и мерцая; по прибытии значок в ленте вспыхивает до
-     1,6×, число окрашивается золотом, «+1» всплывает и тает; сам чип плавно
-     садится обратно (transition transform). */
-  @keyframes gold-burst {
-    0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(217,164,65,0); }
-    55%  { transform: scale(1.45); box-shadow: 0 0 0 6px rgba(217,164,65,0.35), 0 0 22px 6px rgba(217,164,65,0.6); }
-    100% { transform: scale(1.3);  box-shadow: 0 0 0 4px rgba(217,164,65,0.3), 0 0 16px 4px rgba(217,164,65,0.45); }
-  }
-  .word-chip.gold-burst { animation: gold-burst 420ms cubic-bezier(0.2, 0.8, 0.3, 1.2) forwards; }
-  .energy-fly { transition: transform 700ms cubic-bezier(0.35, 0, 0.25, 1); }
-  @keyframes fly-glow {
-    0%, 100% { filter: drop-shadow(0 0 3px rgba(217,164,65,0.9)); }
-    50%      { filter: drop-shadow(0 0 12px rgba(217,164,65,1)); }
-  }
-  .energy-fly.run { animation: fly-glow 350ms ease-in-out infinite; }
-  @keyframes plus-up {
-    from { opacity: 1; transform: translateY(0); }
-    to   { opacity: 0; transform: translateY(-22px); }
-  }
-  .energy-plus.run { animation: plus-up 1000ms ease-out forwards; }
-  @keyframes energy-hit {
-    0%   { transform: scale(1); }
-    35%  { transform: scale(1.6); filter: drop-shadow(0 0 10px rgba(217,164,65,1)); }
-    100% { transform: scale(1); }
-  }
-  .energy-icon.pulse { animation: energy-hit 480ms ease-out; }
-  .energy-value { transition: color 600ms ease; }
-  .energy-value.hit { color: var(--gold-ink); transition: color 0s; }
-
-  /* b23: попап «?» проявляется и чуть съезжает вниз, скрытие — тем же ходом
-     (visibility задерживается до конца, иначе исчезнет рывком). */
-  .energy-pop { transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms; }
-  .energy-pop.open { transition: opacity 180ms ease, transform 180ms ease, visibility 0s; }
-
-  /* Плавный переход подсветки текущего звена; transform/box-shadow —
-     посадка чипа после фазы 1 золотого слова. */
-  .word-chip { transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
-                           transform 0.25s ease, box-shadow 0.25s ease; }
-
-  /* Подсказка «начни отсюда»: глиняная рамка пульсирует ~1.2с (2 × 600мс). */
-  @keyframes nudge-pulse {
-    0%, 100% { box-shadow: inset 0 0 0 3px var(--accent2); }
-    50%       { box-shadow: inset 0 0 0 3px var(--accent2), 0 0 8px 3px rgba(194,112,60,0.35); }
-  }
-  .cell.nudge { animation: nudge-pulse 0.6s ease-in-out 2; }
-
-  /* Сердцебиение текущего чипа при попытке не по порядку. */
-  @keyframes heartbeat {
-    0%   { transform: scale(1); }
-    20%  { transform: scale(1.15); }
-    40%  { transform: scale(1); }
-    65%  { transform: scale(1.1); }
-    100% { transform: scale(1); }
-  }
-  .word-chip.current.heartbeat { animation: heartbeat 600ms ease; }
-}
-
-/* Иконка звука: нота, перечёркнутая ДИАГОНАЛЬНОЙ чертой через CSS (ляжет поверх в любом шрифте). */
-.snd { position: relative; }
-.snd.is-muted { color: var(--text-dim); }
-.snd.is-muted::after {
-  content: "";
-  position: absolute;
-  left: 50%; top: 50%;
-  width: 58%; height: 2px;
-  background: currentColor;
-  transform: translate(-50%, -50%) rotate(-45deg);
-  border-radius: 2px;
-}
-
-/* Правая группа в шапке игры: звук + счётчик. */
-.game-head-right { display: flex; align-items: center; gap: 8px; }
-
-/* Отступ между кнопками в оверлеях (подтверждение сброса). */
-.overlay-card .btn + .btn { margin-top: 10px; }
-
-/* ============================================================
-   Экран выбора уровня.
-   ============================================================ */
-#levels.screen {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  padding: 0;
-}
-.lv-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-  padding: max(12px, env(safe-area-inset-top)) 12px 12px;
-}
-.lv-title { font-size: 18px; font-weight: 700; }
-
-/* Сетка тайлов: прокрутка ТОЛЬКО внутри, без браузерного скролла (п.1.10.2).
-   min-height:0 обязателен — без него flex-ребёнок не режется и вылазит за экран. */
-.levels-grid {
-  flex: 1;
-  min-height: 0;
+  background: rgba(43, 39, 35, 0.65);
+  z-index: 10;
+  /* ТЗ №53: align-items:center снят намеренно — при переполнении (карточка
+     выше вьюпорта) он центрирует flex-item симметрично ОБОИМИ краями за
+     контейнер (flexbug #12), клетка обрезается и сверху, и снизу, и
+     прокрутка не может её достать ни с одной стороны. Вместо этого
+     карточки получили margin:auto (см. .win-card/.onboarding-card) —
+     "safe"-центрирование: при избытке места ведёт себя как раньше
+     (центр), при нехватке карточка прижимается к верхнему краю и
+     становится доступна прокруткой (overflow-y:auto ниже) целиком. #app
+     выше держит touch-action:none, здесь явно возвращён pan-y — иначе
+     тач-прокрутка оверлея невозможна. */
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  padding: 8px 0;
+}
+.overlay[hidden] { display: none; }
+
+.win-card {
+  position: relative;
+  z-index: 2;
+  margin: auto;   /* ТЗ №53: "safe"-центрирование, см. комментарий у .overlay */
+  background: var(--bg);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  max-width: 88vw;
+  animation: card-pop 0.20s ease-out both;
+}
+@keyframes card-pop {
+  from { transform: scale(0.85); opacity: 0; }
+  70%  { transform: scale(1.03); opacity: 1; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.silhouette-mount {
+  background: var(--bg);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: 3px 3px 0 rgba(43, 39, 35, 0.18);
+  line-height: 0;           /* убирает щель под canvas (inline gap) */
+}
+.win-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;           /* border теперь на mount, не на canvas */
+}
+.win-theme {
+  font-size: 1.15rem;
+  color: var(--ink-light);
+  letter-spacing: 0.06em;
+}
+
+/* ТЗ №53: на ВК (карточка ~340px, «Дальше» + «Поделиться» видны) кнопки
+   встают в один ряд вместо двух — экономит ~50px высоты; на Яндексе
+   (одна кнопка) выглядит как раньше. */
+.win-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
-  padding: 12px;
-  align-content: start;
 }
 
-/* b21: заголовок главы внутри сетки — на всю ширину строки. */
-.lv-chapter {
-  grid-column: 1 / -1;
-  margin-top: 8px;
-  padding: 10px 2px 0;
-  border-top: 1px solid var(--tile-border);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-dim);
-  letter-spacing: .01em;
+/* ТЗ №50: «Картинка {k} из 10 · глава «{name}»» — под названием картинки. */
+.win-chapter-line {
+  font-size: 0.8rem;
+  color: var(--ink-light);
+  margin-top: -8px;
 }
-.lv-chapter:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
-.lv-chapter.done { color: var(--accent2); }
-.lv-chapter.locked { opacity: .55; }
 
-/* .lv-tile — независимый класс, не наследует ничего от .cell. */
-.lv-tile {
-  appearance: none;
-  aspect-ratio: 1 / 1;
+/* Награда за главу — тем же каркасом, что #onboarding-overlay/.onboarding-card. */
+.chapter-done-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.chapter-done-reward {
+  font-size: 1rem;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+/* Конфетти */
+.confetti-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+.confetti-piece {
+  position: absolute;
+  top: -12px;
+  border-radius: 2px;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  to { transform: translateY(105vh) rotate(600deg); opacity: 0.2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .win-card { animation: none; }
+  .confetti-piece { display: none; }
+}
+
+/* ТЗ №53: карточка победы обязана влезать в вьюпорт с полем ≥8px
+   сверху/снизу (см. .overlay/margin:auto выше) — диагноз: на ВК-десктоп
+   iframe ~1000×600 карточка (654px при полном наборе — «Поделиться» +
+   тизер) не помещалась в 600px, .overlay резал её с обоих краёв. Блок
+   намеренно стоит ПОСЛЕ базового .win-card (выше) — при равной
+   специфичности источник-порядок решает каскад, а не порядок @media. */
+@media (max-height: 640px) {
+  .win-card { padding: 16px 20px; gap: 10px; }
+  .silhouette-mount { padding: 10px; }
+  .win-theme { font-size: 1rem; }
+  .win-chapter-line { margin-top: -4px; }
+  /* Тизер и так размыт (is-blurred) — нецелое CSS-масштабирование не видно. */
+  .win-tomorrow-canvas { max-height: 56px; width: auto; }
+  .win-tomorrow-label { font-size: 0.68rem; }
+}
+
+/* ТЗ №49, Р7 (ТЗ №26): 568×320 — карточка лестницы и тизер обязаны влезать
+   целиком, ничего не прятать (тот же приём, что уже применён к меню выше).
+   ТЗ №53: на этой же высоте компактная вертикальная раскладка (блок 640px
+   выше) карточке победы всё ещё не хватает — уходит в две колонки:
+   силуэт слева, .win-card-right (название/глава/кнопки/тизер) справа;
+   тизер НЕ прячется (крючок удержания ТЗ №49). */
+@media (max-height: 400px) {
+  .onboarding-card { padding: 14px 20px; gap: 8px; }
+  .ladder-card-day { margin-top: -2px; }
+  .win-card {
+    padding: 14px 20px; gap: 8px;
+    flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+    column-gap: 20px;
+  }
+  .win-card-right {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+}
+
+/* Тумблер режима.
+   Фикс 9B: раньше при нехватке места текст ОБРЕЗАЛСЯ (ellipsis) —
+   недопустимо, весь текст должен читаться целиком даже на 320px. Вместо
+   обрезки — шрифт/паддинги ужимаются (clamp, привязан к ширине вьюпорта),
+   а flex-wrap — аварийный запасной вариант, если сжатие всё же не
+   уместило три кнопки в одну строку. Левый/правый паддинг учитывает
+   safe-area (вырез/жест-навигация в альбомной ориентации).
+   Задача F: нижний край — единственный ряд кнопок, что делит угол
+   с .build-tag. Базовый запас (24px) даёт подписи не наезжать на
+   кнопку даже без safe-area (как в headless-проверке); + env() —
+   на телефонах с домашним индикатором. */
+.mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  justify-content: center;
+  flex-shrink: 0;
+  width: 100%;
+}
+.mode-btn, .hint-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius);
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: clamp(6px, 2vw, 10px) clamp(8px, 3vw, 16px);
+}
+.mode-btn {
+  max-width: 160px;
+  border: 2px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font-size: clamp(0.66rem, 3.1vw, 0.9rem);
+  transition: background 0.12s, color 0.12s;
+}
+.mode-btn.is-active {
+  background: var(--ink);
+  color: var(--bg);
+}
+.hint-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 190px;
+  border: 2px solid var(--ink-light);
+  background: transparent;
+  color: var(--ink-light);
+  font-size: clamp(0.6rem, 2.8vw, 0.82rem);
+}
+.hint-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* ТЗ (RV-значок, Яндекс 4.5.1, усиление 2026-09-06 №2, прямая просьба
+   основателя): значок теперь ПОСТОЯННЫЙ элемент разметки (index.html, не
+   переключается JS) — раньше появлялся только ПОСЛЕ исчерпания баланса,
+   и сам переход ощущался как неожиданность. position:relative — якорь
+   для .hint-badge (ниже), который теперь сидит на углу значка, а не на
+   углу всей кнопки. */
+.hint-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+/* ТЗ (RV-подпись, Яндекс 4.5.1, заход №3, 2026-09-06): "Подсказка" —
+   ПОСТОЯННЫЙ, единственный главный текст кнопки (реагирует основатель:
+   заход №2 при исчерпании баланса менял его целиком на «Смотреть
+   рекламу» — кнопка переставала читаться как инструмент-подсказка среди
+   «Закрасить»/«Крестик»). Факт рекламы — вторичная мелкая строка ниже,
+   см. .hint-ad-caption. */
+.hint-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  min-width: 0;
+}
+/* pointer-events наследуются нормально (не задаём none) — это часть текста
+   кнопки, не декоративный оверлей. visibility, не hidden/display:none —
+   строка всегда резервирует свою высоту, чтобы кнопка не меняла размер
+   (и не тянула за собой всю .mode-bar, align-items:stretch по умолчанию)
+   при переключении между «есть бесплатные» и «дальше реклама» — переключает
+   .is-visible updateHintBadge() в main.js. */
+.hint-ad-caption {
+  font-size: 0.68em;
+  font-weight: 400;
+  visibility: hidden;
+}
+.hint-ad-caption.is-visible {
+  visibility: visible;
+}
+/* ТЗ №03, Фаза 1: видимый баланс бонусных подсказок (награда 2-го дня
+   серии входов, ТЗ №01 — до этого жила только 3с тоста и пропадала).
+   pointer-events:none — бейдж никогда не перехватывает тап, весь клик
+   уходит на саму кнопку. Якорь — .hint-icon-wrap (значок), не сама
+   кнопка (см. правку 2026-09-06 №2 выше); смещение подобрано под 15px
+   значок так, чтобы бейдж не уходил за правый край .mode-bar на
+   320×568/568×320 (запас 16px, см. живой прогон — tools/test_hint_badge.js). */
+.hint-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ТЗ №51: кнопка «Проверить» (#btn-check) — тот же каркас .hint-btn/
+   .hint-icon-wrap/.hint-label/.hint-ad-caption, что и у #btn-hint (см. выше).
+   #check-icon-mark — статичная «✓», видна ВСЕГДА, кроме режима «за
+   рекламу» (main.js::updateCheckButton переключает hidden на этом элементе
+   и на #check-ad-icon зеркально — ровно один из двух виден). Размер 15px —
+   тот же, что у .ad-icon (та же коробка hint-icon-wrap), чтобы кнопка не
+   меняла ширину при переключении режима. */
+.check-icon-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* ТЗ №51а: атрибут hidden на <svg> браузер не отрабатывает (UA-правило
+   [hidden]{display:none} — только для HTML-элементов), поэтому #check-ad-icon
+   (svg) оставался виден во всех режимах поверх «✓». #check-icon-mark — span,
+   ему UA-правило и так помогает, но правило дублируем на оба явно, той же
+   схемой, что .ad-loading-overlay[hidden]/.retention-rewarded-btn[hidden]
+   (см. ТЗ №12). */
+#check-ad-icon[hidden], #check-icon-mark[hidden] { display: none; }
+/* Подпись-статус (бесплатно/за подсказку/за рекламу) — в отличие от
+   #hint-ad-caption у #btn-hint (видна ТОЛЬКО в режиме рекламы), здесь
+   видна ВСЕГДА — состояние меняется, а не появляется/исчезает целиком
+   (п.2 ТЗ №51). is-visible проставлен статично в index.html. */
+#check-caption { visibility: visible; }
+
+/* ---- Экран календаря ---- */
+
+.cal-back-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.cal-wrap {
+  width: min(300px, 90vw);
+}
+
+.cal-title {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: normal;
+  margin-bottom: 16px;
+  color: var(--ink);
+}
+
+.cal-weekdays,
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.cal-weekdays {
+  margin-bottom: 4px;
+}
+
+.cal-weekday {
+  text-align: center;
+  font-size: 0.68rem;
+  color: var(--ink-light);
+  padding-bottom: 4px;
+}
+
+.cal-day {
+  aspect-ratio: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 10px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text);
-  cursor: pointer;
+  font-size: 0.82rem;
+  border-radius: var(--radius);
+  border: 1.5px solid transparent;
+  color: var(--ink);
 }
-.lv-tile:active { transform: scale(0.96); }
-.lv-tile.locked { opacity: .5; pointer-events: none; }
-.lv-tile.current { border: 2px solid var(--accent2); }
+
+.cal-day.empty { visibility: hidden; }
+
+.cal-day.done {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.cal-day.today {
+  border-color: var(--ink);
+  font-weight: bold;
+}
+
+.cal-day.today.done {
+  border-color: rgba(43, 39, 35, 0.35);
+}
+
+/* ---- Экран косметики (Задача E — каркас, Задача I — список гамм) ---- */
+
+/* Список из N карточек может быть выше экрана (320×568 и меньше) —
+   тот же приём, что у #chapters (свой скролл, а не по центру), с отступом
+   сверху, чтобы не залезать под back-button (cat-back-btn:
+   top 12px + ~36px высоты кнопки). */
+#shop {
+  justify-content: flex-start;
+  overflow-y: auto;
+  padding: 56px 0 24px;
+}
+
+.shop-status {
+  font-size: 0.85rem;
+  color: var(--ink-light);
+  margin: 0 0 16px;
+  text-align: center;
+  width: min(280px, 85vw);
+}
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(320px, 88vw);
+}
+
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+}
+
+.shop-swatch {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 3px;
+  border: 1.5px solid var(--ink);
+  position: relative;
+}
+.shop-swatch-ink {
+  position: absolute;
+  inset: 8px;
+  border-radius: 2px;
+}
+
+.shop-item-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.shop-item-name {
+  font-size: 0.95rem;
+  color: var(--ink);
+  /* Название гаммы не гарантированно содержит пробелы/дефисы (локали,
+     будущие гаммы) — без этого длинное слово не переносится и вылезает
+     поверх колонки кнопок (см. баг с «Чернильно-синий»). break-word (не
+     anywhere) — переносит только когда реально не помещается, не режет
+     слово раньше времени и не срезает intrinsic-ширину колонки в флексе. */
+  overflow-wrap: break-word;
+}
+.shop-item-status {
+  font-size: 0.78rem;
+  color: var(--ink-light);
+  min-height: 1.1em;
+}
+
+.shop-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 104px; /* ТЗ №07, фаза 3.1: фикс. ширина колонки — иначе длинная
+    подпись ("Откроется за серию входов") росла в nowrap-кнопке и наезжала
+    на соседний ряд (баг «Терракоты»). Совместимо с overflow-wrap выше —
+    ширина колонки задана явно, а не выведена из содержимого (ТЗ №18). */
+}
+.shop-item-actions .btn {
+  min-height: 44px; /* тап-таргет пальцем — постановка задачи требует ≥44 CSS-px */
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+}
+.shop-currency-icon {
+  height: 0.9em;
+  width: auto;
+  vertical-align: middle;
+}
