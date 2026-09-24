@@ -1,15 +1,31 @@
 /* ============================================================
+   СЛОВОХОД, ЭТАП 3 (23.08.2026), п.0.1 «копируем систему, не изобретаем»:
+   файл взят КОПИЕЙ из Color Sort (game3/color_sort/retention.js) —
+   побайтово, md5 e166b28a. Ни одной строки логики не тронуто; всё
+   различие между играми живёт в КОНФИГЕ, который передаёт main.js
+   (gateMode:'energy', tickMs 6ч, dripPerTick 10, accumulatorCap 15,
+   streakDayReward {2:'hints',3:'hints'}). Если модуль когда-нибудь
+   придётся править — правка идёт в ОБЕ игры, иначе они разъедутся и
+   «общий модуль» перестанет быть общим.
+
+   Комментарий ниже — авторский, из Color Sort; в нём Color Sort
+   называется «здесь». Оставлен как есть намеренно: это часть копии.
+   ------------------------------------------------------------
    retention.js — модуль удержания: замок кампании + раздатчик уровней +
-   серия входов. ТЗ №01. Только ВК-сборка (build.py подключает файл и
-   тег <script> исключительно в build_vk() — в яндекс-сборку не входит).
+   серия входов. Перенесён БЕЗ ИЗМЕНЕНИЙ КОДА (перенос готового кода, ТЗ
+   №14 этап 2) из репозитория нонограмм (ТЗ №01, ветка release/vk,
+   commit d0bf438), где написан и принят первым. Здесь — обе сборки
+   площадки (Яндекс + ВК): build.py подключает файл и тег <script> в
+   ОБЕИХ целях (в отличие от нонограмм, где модуль только на ВК) —
+   Color Sort использует один index.html/main.js на обе площадки, порт
+   не должен разводить их (ТЗ №14, п.2.4).
 
    Чистые функции без побочных эффектов (тот же принцип, что в save.js):
    не трогают DOM, не читают Platform, не лезут в LEVELS/main.js напрямую.
    Игра передаёт всё нужное через config.callbacks и получает текущее
    время (Platform.now()) снаружи — модуль сам часы не читает, поэтому
-   тестируется в Node без браузера (см. tools/test_retention_*.js) и
-   переносится в другие игры студии (Словоход, Color Sort) без правок:
-   конфиг у каждой игры свой, retention.js — общий.
+   тестируется в Node без браузера и переносится в другие игры студии
+   без правок: конфиг у каждой игры свой, retention.js — общий.
 
    ТРИ НЕЗАВИСИМЫХ МЕХАНИКИ:
    1. Замок (isLevelOpen) — какие уровни кампании доступны игроку.
@@ -38,10 +54,21 @@
 })(typeof window !== 'undefined' ? window : this, function () {
 
   var DEFAULT_CONFIG = {
+    // Режим гейта (ТЗ №15, Color Sort): 'unlock' — накопитель ОТКРЫВАЕТ
+    // уровни кампании (нонограммы, поведение этим не меняется НИ НА
+    // БАЙТ — дефолт сохранён). 'energy' — накопитель НЕ открывает
+    // ничего, это самостоятельная тратимая валюта: dripOpened
+    // интерпретируется ПРЯМО как текущий баланс (не через backlog от
+    // maxReachedIndex), тратится явно (см. spendEnergy), новый ИЛИ
+    // мигрирующий игрок стартует с ПОЛНЫМ накопителем (см. initState).
+    // Такт/порция/потолок/пополнение рекламой/серия входов — ОДИН и
+    // тот же код на оба режима, меняется только точка применения
+    // ресурса (см. заголовок файла).
+    gateMode:        'unlock',
     tickMs:          6 * 60 * 60 * 1000, // такт раздатчика (п.2.1)
     dripPerTick:     1,                  // порция — сколько уровней открывает один такт (ТЗ №08)
     accumulatorCap:  4,                  // потолок накопителя (п.2.1)
-    starterCount:    11,                 // стартовый запас, всегда открыт (п.2.1)
+    starterCount:    11,                 // стартовый запас, всегда открыт (п.2.1) — gateMode:'energy' его не использует
     streakThreshold: 3,                  // длина серии для полной награды (п.2.3)
     streakDayReward: { 2: 'hints', 3: 'style' }, // день -> тип награды (п.2.3)
     contentUnitName: 'puzzle', // название единицы контента для UI игры (i18n-ключ, не литерал)
@@ -118,31 +145,58 @@
      --------------------------------------------------------------- */
 
   // Сколько сейчас «в накопителе» — открыто раздатчиком, но игрок ещё не
-  // добрался (см. дизайн-решение в шапке файла).
+  // добрался (см. дизайн-решение в шапке файла). gateMode:'energy' —
+  // накопитель НЕ привязан к прогрессу (maxReachedIndex), dripOpened
+  // ЭТО и есть текущий баланс напрямую (тратится явно, см. spendEnergy).
   function dripBacklogCount(moduleState, config) {
+    if (config.gateMode === 'energy') return moduleState.dripOpened;
     var reached  = config.callbacks.maxReachedIndex();
     var consumed = Math.max(0, Math.min(moduleState.dripOpened, (reached + 1) - config.starterCount));
     return moduleState.dripOpened - consumed;
   }
 
+  // Тратит 1 единицу накопителя (ТЗ №15, gateMode:'energy' ТОЛЬКО —
+  // вызывающая сторона решает, когда: Color Sort тратит за успешно
+  // ЗАВЕРШЁННЫЙ новый уровень, не за рестарт/повтор пройденного, это
+  // не забота модуля). Floor в 0 — защита от двойного списания гонкой,
+  // не рабочий путь (UI обязан не пускать игрока начать уровень при 0).
+  function spendEnergy(moduleState, config) {
+    if (moduleState.dripOpened <= 0) return moduleState;
+    return {
+      dripOpened: moduleState.dripOpened - 1,
+      lastTickAt: moduleState.lastTickAt,
+      lastEntryDay: moduleState.lastEntryDay,
+      streakLen: moduleState.streakLen,
+      streakRewards: moduleState.streakRewards,
+    };
+  }
+
   // Продвигает раздатчик на nowMs тактов вперёд. Чистая функция — не
   // мутирует moduleState, возвращает НОВЫЙ объект (или тот же, если тактов
-  // не набежало). Если накопитель полон — время «стоит»: lastTickAt не
-  // продвигается вообще, поэтому простой не теряется — как только у
-  // игрока появится место в накопителе (сыграет дальше), заслуженные
-  // такты применятся сразу.
+  // не набежало).
   //
-  // Часы устройства ушли НАЗАД (ТЗ №26, Этап 5 — долг, перенесён из
-  // Color Sort, ТЗ №18 §B): nowMs МЕНЬШЕ сохранённого lastTickAt.
-  // Начисление не производится (нечего множить на отрицательный elapsed),
-  // штамп подтягивается к «сейчас». Альтернатива — оставить штамп из
-  // «будущего» — заперла бы игрока на весь сдвиг часов (порт часов на год
-  // назад запер бы раздатчик на год); эта дешевле и безопаснее. Порт
-  // буквальный — Nonogram не знает gateMode:'energy' (Color Sort), здесь
-  // только один режим («раздатчик очереди уровней», ТЗ №08), для которого
-  // Color Sort сам оставляет поведение «накопитель полон — время стоит»
-  // нетронутым — вторая часть починки ТЗ №18 (штамп у потолка в режиме
-  // energy) сюда не переносится, она про другой режим.
+  // Полный накопитель — ПО РЕЖИМУ (ТЗ №18, сценарии A5/A6, найдено при
+  // проверке, не новая механика):
+  //   gateMode:'unlock' (раздатчик уровней, ТЗ №08) — время «стоит»:
+  //     lastTickAt не продвигается вообще, простой не теряется — как
+  //     только у игрока появится место (сыграет дальше), заслуженные
+  //     такты применятся сразу. Это ЖЕЛАТЕЛЬНОЕ поведение для очереди
+  //     уровней — оставлено нетронутым.
+  //   gateMode:'energy' (Color Sort, ТЗ №15) — ТАК ЖЕ было устроено, и
+  //     это дефект сценария: пока накопитель полон, реальное время
+  //     утекает «в тень» (lastTickAt не двигается), и как только игрок
+  //     потратит энергию, applyDripTick меряет elapsed от давно
+  //     устаревшего lastTickAt и выдаёт пачку набежавших тактов разом —
+  //     энергия перестаёт быть тратимой валютой с честным кулдауном.
+  //     Поэтому в РЕЖИМЕ ENERGY штамп подтягивается к «сейчас» каждый
+  //     раз, когда накопитель ОСТАЁТСЯ или СТАНОВИТСЯ полным — простой
+  //     не банкуется, накопление просто останавливается на потолке.
+  //
+  // Часы устройства ушли НАЗАД (ТЗ №18, B1/B2) — nowMs МЕНЬШЕ сохранённого
+  // lastTickAt: начисление не производится ни в одном режиме (нечего
+  // множить на отрицательный elapsed), а штамп подтягивается к «сейчас».
+  // Альтернатива — оставить штамп из «будущего» — заперла бы игрока на
+  // весь сдвиг часов (в B2 — на год); эта дешевле и безопаснее.
   function applyDripTick(moduleState, nowMs, config) {
     if (nowMs < moduleState.lastTickAt) {
       return {
@@ -156,7 +210,16 @@
 
     var backlog = dripBacklogCount(moduleState, config);
     var room = config.accumulatorCap - backlog;
-    if (room <= 0) return moduleState;
+    if (room <= 0) {
+      if (config.gateMode !== 'energy' || moduleState.lastTickAt === nowMs) return moduleState;
+      return {
+        dripOpened: moduleState.dripOpened,
+        lastTickAt: nowMs,
+        lastEntryDay: moduleState.lastEntryDay,
+        streakLen: moduleState.streakLen,
+        streakRewards: moduleState.streakRewards,
+      };
+    }
 
     var elapsed = nowMs - moduleState.lastTickAt;
     if (elapsed < config.tickMs) return moduleState;
@@ -166,16 +229,23 @@
     // ПРИМЕНЁННЫХ тактов ограничено местом в накопителе (в тактах, округление
     // вверх — последний такт у потолка может отдать неполную порцию), а не
     // самим grant — иначе lastTickAt продвинется на время, которое реально
-    // не «выкуплено» гарантом простоя (см. комментарий выше: время должно
-    // стоять, пока накопитель полон, простой не теряется).
+    // не «выкуплено» гарантом простоя (см. комментарий у gateMode:'unlock'
+    // выше: время должно стоять, пока накопитель полон, простой не теряется).
     var ticksForRoom = Math.ceil(room / config.dripPerTick);
     var ticksApplied = Math.min(ticks, ticksForRoom);
     if (ticksApplied <= 0) return moduleState;
     var grant = Math.min(ticksApplied * config.dripPerTick, room);
+    // ТЗ №18 (A5), режим energy: если ИМЕННО ЭТОТ такт довёл до потолка,
+    // штамп подтягивается к «сейчас» — не к точному числу применённых
+    // тактов, иначе неиспользованный остаток «банкуется в тени» (см.
+    // заголовок функции). Пока место ЕСТЬ (потолок не достигнут) —
+    // остаток такта СОХРАНЯЕТСЯ (A4): штамп двигается ровно на
+    // применённые целые такты, не обнуляется до «сейчас».
+    var reachedCap = config.gateMode === 'energy' && (backlog + grant) >= config.accumulatorCap;
 
     return {
       dripOpened: moduleState.dripOpened + grant,
-      lastTickAt: moduleState.lastTickAt + ticksApplied * config.tickMs,
+      lastTickAt: reachedCap ? nowMs : moduleState.lastTickAt + ticksApplied * config.tickMs,
       lastEntryDay: moduleState.lastEntryDay,
       streakLen: moduleState.streakLen,
       streakRewards: moduleState.streakRewards,
@@ -198,7 +268,12 @@
      когда звать, сам модуль такого состояния не хранит.
      --------------------------------------------------------------- */
   function grantDrip(moduleState, config, amount) {
-    var maxDripOpened = Math.max(0, config.callbacks.totalLevels() - config.starterCount);
+    // gateMode:'energy': предел — потолок накопителя (ТЗ №15, «реклама
+    // пополняет вне очереди, не выше потолка»), НЕ размер кампании —
+    // totalLevels()/starterCount к энергии отношения не имеют.
+    var maxDripOpened = config.gateMode === 'energy'
+      ? config.accumulatorCap
+      : Math.max(0, config.callbacks.totalLevels() - config.starterCount);
     var newDripOpened = Math.min(moduleState.dripOpened + amount, maxDripOpened);
     if (newDripOpened === moduleState.dripOpened) return moduleState;
     return {
@@ -315,12 +390,23 @@
      --------------------------------------------------------------- */
   function initState(maxReachedIndex, nowMs, config) {
     var isBrandNew = maxReachedIndex < 0;
-    // ТЗ №08: новый игрок стартует с ОДНОЙ порцией в накопителе (уважение,
-    // не полный потолок с первой секунды) — starterCount + dripPerTick
-    // открытых уровней на старте, не starterCount + accumulatorCap.
-    var dripOpened = isBrandNew
-      ? config.dripPerTick
-      : Math.max(0, (maxReachedIndex + 1) - config.starterCount);
+    var dripOpened;
+    if (config.gateMode === 'energy') {
+      // ТЗ №15, п.1.1: «у нового игрока энергия полная» — энергия не
+      // привязана к прогрессу (maxReachedIndex не участвует вообще),
+      // поэтому и мигрирующий игрок (первый заход после апдейта)
+      // стартует с полным накопителем тем же путём — щедрость, не
+      // штраф за то, что модуль подключили не с первого дня.
+      dripOpened = config.accumulatorCap;
+    } else {
+      // ТЗ №08: новый игрок стартует с ОДНОЙ порцией в накопителе
+      // (уважение, не полный потолок с первой секунды) — starterCount +
+      // dripPerTick открытых уровней на старте, не starterCount +
+      // accumulatorCap.
+      dripOpened = isBrandNew
+        ? config.dripPerTick
+        : Math.max(0, (maxReachedIndex + 1) - config.starterCount);
+    }
     return {
       dripOpened:    dripOpened,
       lastTickAt:    nowMs,
@@ -387,6 +473,7 @@
     mergeConfig:         mergeConfig,
     isLevelOpen:         isLevelOpen,
     dripBacklogCount:    dripBacklogCount,
+    spendEnergy:         spendEnergy,
     applyDripTick:       applyDripTick,
     nextUnlockAtMs:      nextUnlockAtMs,
     openUnfinishedCount: openUnfinishedCount,
