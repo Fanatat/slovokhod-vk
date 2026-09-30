@@ -633,9 +633,6 @@ html, body {
 .win-energy { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); }
 .win-energy[hidden] { display: none; }
 
-/* b19 — второй шаг туториала: два чипа цепочки, как в списке слов. */
-.tut-chain { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0 0 8px; }
-
 /* Узкий экран (320px): строка запаса на игровом экране переносится под
    число, иначе многоточие съедает всё сообщение. */
 @media (max-width: 360px) {
@@ -669,37 +666,9 @@ html, body {
   to { transform: translateY(520px) rotate(540deg); opacity: 0; }
 }
 
-/* Туториал — мини-демо поля с анимированным путём. */
-.tut-demo {
-  display: grid;
-  grid-template-columns: repeat(2, 48px);
-  gap: 6px;
-  margin: 16px auto 14px;
-  width: fit-content;
-}
-.tut-cell {
-  width: 48px; height: 48px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--surface);
-  border: 1px solid var(--tile-border);
-  border-radius: 10px;
-  font-size: 20px; font-weight: 600;
-}
-.tut-cell.tut-empty { background: transparent; border-color: transparent; }
-.tut-cell.tut-path { animation: tut-seq 2.8s ease infinite; }
-.tut-text { font-size: 15px; margin: 0 0 20px; line-height: 1.45; }
-
-/* Ячейка: сначала обычная → потом синяя (ведём) → потом зелёная (найдено). */
-@keyframes tut-seq {
-  0%, 18%  { background: var(--surface); color: var(--text); border-color: var(--tile-border); }
-  26%, 58% { background: #2f6fed; color: #fff; border-color: #2f6fed; }
-  68%, 100%{ background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
-}
-
 /* Уважение к настройке «меньше движения». */
 @media (prefers-reduced-motion: reduce) {
   .board.shake, .overlay-card.pop, .confetti { animation: none; }
-  .tut-cell.tut-path { animation: none; background: #2e9e5b; color: #fff; border-color: #2e9e5b; }
   /* При heartbeat-классе без анимации — краткая инверсия цвета чипа (акцент считывается). */
   .word-chip.current.heartbeat { background: var(--accent2); border-color: var(--accent2); color: #f6efdd; }
 }
@@ -867,3 +836,134 @@ html, body {
 .lv-tile:active { transform: scale(0.96); }
 .lv-tile.locked { opacity: .5; pointer-events: none; }
 .lv-tile.current { border: 2px solid var(--accent2); }
+
+/* ============================================================
+   b24 — СОЧНОСТЬ И МИКРО-ЦЕЛИ. Цвета — только из :root и уже
+   принятых цветов поля (синий «ведём», зелёный «найдено»). Всё
+   движение — transform/opacity (композитор, без перерисовки поля),
+   под prefers-reduced-motion остаются только цвета.
+   ============================================================ */
+
+/* «Призрачный палец» (board.js demoPath): кончик пальца ведёт по словам. */
+.cell.ghost { background: rgba(47,111,237,0.16); border-color: #2f6fed; }
+.ghost-finger {
+  position: absolute; left: 0; top: 0; z-index: 4;
+  width: 34px; height: 34px; margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  background: rgba(43,39,35,0.28);
+  border: 3px solid rgba(255,255,255,0.92);
+  box-shadow: 0 4px 12px rgba(43,39,35,0.3);
+  pointer-events: none;
+  opacity: 0;
+  /* Позиция (--gx/--gy, ставит board.js) и сжатие «нажатия» (--gs) — в ОДНОМ
+     transform: scale после translate жмёт палец вокруг его центра. Отдельное
+     свойство scale применялось бы поверх transform и сжимало бы вместе с
+     пальцем и сдвиг от угла поля — палец уезжал мимо клетки (F09, b25). */
+  transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(var(--gs, 1));
+}
+.ghost-finger.show { opacity: 1; }
+
+/* Всплывающие очки и комбо над последней буквой слова (main.js floatText). */
+.float-text {
+  position: fixed; z-index: 58;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid #2e9e5b;
+  box-shadow: 0 3px 10px rgba(43,39,35,0.18);
+  font-weight: 800; font-size: 17px; line-height: 1;
+  color: #2e9e5b;
+  opacity: 0;
+}
+.float-text.combo { color: var(--accent-ink); background: var(--accent2); border-color: var(--accent2); font-size: 15px; }
+
+/* Звёзды на победе. */
+.win-stars { display: flex; justify-content: center; align-items: flex-end; gap: 6px; margin: -2px 0 8px; min-height: 46px; }
+.win-star { display: inline-block; font-size: 36px; line-height: 1; color: var(--tile-border); }
+.win-star:nth-child(2) { font-size: 46px; }
+.win-star.on { color: var(--gold); text-shadow: 0 2px 0 #b8862c, 0 0 14px rgba(217,164,65,0.55); }
+
+/* Прогресс главы на победе — ближайшая цель. */
+.win-chapter { margin: 0 0 14px; }
+.win-chapter-label { margin: 0 0 6px; font-size: 13px; color: var(--text-dim); }
+.win-chapter.done .win-chapter-label { color: var(--accent2-ink); font-weight: 700; }
+.win-chapter-bar { height: 8px; border-radius: 4px; background: var(--tile-border); overflow: hidden; }
+.win-chapter-fill { height: 100%; width: 0; border-radius: 4px; background: linear-gradient(90deg, var(--accent2), var(--gold)); }
+
+/* Звёзды в сетке уровней: «★★★», закрашенная часть — градиентом по тексту. */
+.lv-tile { flex-direction: column; gap: 1px; }
+.lv-stars { font-size: 10px; line-height: 1; letter-spacing: 1px; color: var(--tile-border); }
+.lv-stars.s1, .lv-stars.s2, .lv-stars.s3 { -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lv-stars.s1 { background-image: linear-gradient(90deg, var(--gold) 33.3%, var(--tile-border) 33.3%); }
+.lv-stars.s2 { background-image: linear-gradient(90deg, var(--gold) 66.6%, var(--tile-border) 66.6%); }
+.lv-stars.s3 { background-image: linear-gradient(90deg, var(--gold) 100%, var(--gold) 100%); }
+.lv-chapter-stars { float: right; color: var(--gold-ink); font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-text { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Буква добавлена в путь — короткий «щелчок». !important у задержки:
+     у клеток в style висит задержка каскада появления (board.js render),
+     она не должна откладывать отклик на касание. */
+  @keyframes cell-tick {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  .cell.tick { animation: cell-tick 170ms ease-out !important; animation-delay: 0s !important; }
+
+  /* Слово найдено — клетки подпрыгивают волной (задержку по клетке ставит board.js). */
+  @keyframes found-wave {
+    0%   { transform: scale(1); }
+    35%  { transform: translateY(-5px) scale(1.16); }
+    70%  { transform: scale(0.97); }
+    100% { transform: scale(1); }
+  }
+  .cell.found-wave { animation: found-wave 400ms cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+
+  .ghost-finger { transition: opacity 250ms ease; }
+  .ghost-finger.moving { transition: opacity 250ms ease, transform 300ms ease-in-out; }
+  .ghost-finger.press { --gs: 0.82; }
+  .cell.ghost { transition: background-color 0.2s ease, border-color 0.2s ease; }
+
+  @keyframes float-up {
+    0%   { opacity: 0; transform: translate(-50%, -30%) scale(0.7); }
+    15%  { opacity: 1; transform: translate(-50%, -70%) scale(1.12); }
+    100% { opacity: 0; transform: translate(-50%, -170%) scale(1); }
+  }
+  .float-text { animation: float-up 1000ms ease-out forwards; }
+
+  @keyframes star-pop {
+    0%   { transform: scale(0.3) rotate(-25deg); }
+    60%  { transform: scale(1.3) rotate(8deg); }
+    100% { transform: scale(1) rotate(0); }
+  }
+  .win-star.on { animation: star-pop 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+  .win-star { transition: color 0.15s ease; }
+  .win-chapter-fill { transition: width 700ms cubic-bezier(0.3, 0.9, 0.3, 1); }
+
+  /* Главное действие экрана мягко «зовёт» — от кнопки расходится светящееся
+     кольцо. Анимируется псевдоэлемент (opacity/transform), а не сама кнопка:
+     её габариты неподвижны — нажатие (.btn:active) не глушится, а
+     автотесты (Playwright ждёт «стабильный» элемент) кликают как раньше. */
+  .menu-actions .btn-primary, #btn-next, #btn-daily-claim { position: relative; }
+  .menu-actions .btn-primary::after, #btn-next::after, #btn-daily-claim::after {
+    content: '';
+    position: absolute; inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 3px rgba(194,112,60,0.55), 0 0 14px 4px rgba(194,112,60,0.35);
+    opacity: 0;
+    pointer-events: none;
+    animation: call-ring 2.4s ease-out 1.2s infinite;
+  }
+  @keyframes call-ring {
+    0%   { opacity: 0;   transform: scale(1); }
+    25%  { opacity: 0.9; transform: scale(1.01); }
+    100% { opacity: 0;   transform: scale(1.08, 1.25); }
+  }
+}

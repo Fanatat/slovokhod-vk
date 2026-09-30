@@ -19,7 +19,11 @@
        бы полусобранную версию (шрам ТЗ №19 Color Sort).
        Вне билда плейсхолдер остаётся как есть — это нормально, значит
        билд не собирался через build.py. -->
-  <link rel="stylesheet" href="style.css?v=23" />
+  <link rel="stylesheet" href="style.css?v=50" />
+  <!-- b25: манифест звуков (sound.js читает адрес отсюда). ?v= штампует
+       build.py, как у скриптов, — sound.js дописывает ту же версию к
+       каждому звуковому файлу, чтобы после обновления не играл старый. -->
+  <meta name="sfx-manifest" content="assets/audio/manifest.json?v=50" />
 
   <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
        Вне билда (локальная разработка) маркер НЕ заменяется:
@@ -29,7 +33,7 @@
   <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
        window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
        заменяется: main.js покажет плашку "dev" вместо номера. -->
-  <script>window.BUILD = 'vk-b23-c0aa88f-20260913';</script>
+  <script>window.BUILD = 'vk-b50-2a68825-20260928';</script>
 </head>
 <body>
   <div id="app">
@@ -79,12 +83,12 @@
           <p id="daily-title" class="overlay-title"></p>
           <div id="daily-cells" class="cal-row"></div>
           <p id="daily-reward" class="daily-reward"></p>
-          <button id="btn-daily-claim" class="btn btn-primary" data-i18n="dailyClaim">Забрать</button>
+          <button id="btn-daily-claim" class="btn btn-primary" data-sfx="none" data-i18n="dailyClaim">Забрать</button>
           <p id="daily-tomorrow" class="daily-tomorrow"></p>
         </div>
       </div>
 
-      <button id="btn-sound" class="sound-toggle snd" aria-label="Звук" title="Звук">♪</button>
+      <button id="btn-sound" class="sound-toggle snd" data-sfx="none" aria-label="Звук" title="Звук">♪</button>
 
       <p id="dev-badge" class="dev-badge" hidden>dev-режим: платформа не подключена</p>
     </section>
@@ -109,7 +113,7 @@
         </div>
         <div class="game-head-right">
           <button id="btn-restart-level" class="icon-btn" aria-label="Заново" title="Заново">↻</button>
-          <button id="btn-sound-game" class="icon-btn snd" aria-label="Звук" title="Звук">♪</button>
+          <button id="btn-sound-game" class="icon-btn snd" data-sfx="none" aria-label="Звук" title="Звук">♪</button>
           <span id="game-counter" class="game-counter">0 / 0</span>
         </div>
       </header>
@@ -140,41 +144,29 @@
            textContent кнопки (подпись зависит от доступности рекламы),
            и вложенный span был бы стёрт при первой же перерисовке. -->
       <div class="hint-wrap">
-        <button id="btn-hint" class="hint-btn" data-i18n="hint">Подсказка за рекламу</button>
+        <button id="btn-hint" class="hint-btn" data-sfx="none" data-i18n="hint">Подсказка за рекламу</button>
         <span id="hint-bonus-badge" class="hint-bonus-badge" hidden></span>
       </div>
 
-      <!-- Оверлей обучения: показывается один раз на первом уровне -->
-      <div id="tutorial" class="overlay" hidden>
-        <div class="overlay-card">
-          <p class="overlay-title" data-i18n="howToPlay">Как играть</p>
-          <div class="tut-demo">
-            <div class="tut-cell tut-path" style="animation-delay:0s">К</div>
-            <div class="tut-cell tut-path" style="animation-delay:0.45s">О</div>
-            <div class="tut-cell tut-empty"></div>
-            <div class="tut-cell tut-path" style="animation-delay:0.9s">Т</div>
-          </div>
-          <p class="tut-text" data-i18n="tutorialText">Веди пальцем по соседним буквам, чтобы составить слово</p>
-          <!-- b19: второй шаг — порядок слов, главное отличие игры.
-               b20: формулировка про «последнюю букву» убрана (решение основателя
-               12.09): игрок читал её как «путь продолжается с той же клетки». -->
-          <div class="tut-chain" aria-hidden="true">
-            <span class="word-chip found">КОТ</span>
-            <span class="chain-sep">→</span>
-            <span class="word-chip current">ТАЗ</span>
-          </div>
-          <p class="tut-text" data-i18n="tutorialChain">Слова ищутся по порядку: следующее всегда подсвечено внизу</p>
-          <button id="btn-tutorial-ok" class="btn btn-primary" data-i18n="tutorialOk">Понятно!</button>
-        </div>
-      </div>
+      <!-- b24: модальный «Как играть» (#tutorial) убран — вместо него на 1-м
+           уровне «призрачный палец» проводит первое слово прямо по полю
+           (board.js demoPath) и крутится до первого касания. Порядок слов
+           объясняет строка #howto выше и подсвеченный чип цепочки. -->
 
       <!-- Оверлей победы -->
       <div id="win" class="overlay" hidden>
         <div class="overlay-card">
           <p class="overlay-title" data-i18n="levelDone">Уровень пройден</p>
+          <!-- b24: звёзды 1–3 (main.js renderWinStars) -->
+          <div id="win-stars" class="win-stars" aria-hidden="true"></div>
           <p id="win-score" class="win-score"></p>
           <p id="win-best" class="win-best"></p>
           <p id="win-new" class="win-new" hidden data-i18n="newRecord">Новый рекорд!</p>
+          <!-- b24: прогресс главы — ближайшая цель (main.js renderWinChapter) -->
+          <div id="win-chapter" class="win-chapter">
+            <p id="win-chapter-label" class="win-chapter-label"></p>
+            <div class="win-chapter-bar"><div id="win-chapter-fill" class="win-chapter-fill"></div></div>
+          </div>
           <!-- b19: предупреждение о близкой стене (текст — renderEnergy по классу .energy-line) -->
           <p id="win-energy" class="win-energy energy-line" hidden></p>
           <!-- b20: после последнего уровня (решение основателя 12.09) -->
@@ -224,12 +216,14 @@
        текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
   <div id="build-badge" aria-hidden="true"></div>
 
-  <script src="i18n.js?v=23"></script>
-  <script src="platform.js?v=23"></script>
-  <script src="levels.js?v=23"></script>
-  <script src="board.js?v=23"></script>
-  <script src="sound.js?v=23"></script>
-  <script src="retention.js?v=23"></script>
-  <script src="main.js?v=23"></script>
+  <script src="i18n.js?v=50"></script>
+  <script src="platform.js?v=50"></script>
+  <script src="levels.js?v=50"></script>
+  <script src="board.js?v=50"></script>
+  <script src="sound.js?v=50"></script>
+  <script src="fx.js?v=50"></script>
+  <script src="retention.js?v=50"></script>
+  <script src="analytics.js?v=50"></script>
+  <script src="main.js?v=50"></script>
 </body>
 </html>

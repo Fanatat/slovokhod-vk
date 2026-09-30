@@ -4,6 +4,13 @@
    Сверка пути со словами (прямой/обратный порядок).
    При находке зовём handlers.onProgress(found, total); при сборе всех —
    handlers.onComplete(). Диагностическую строку убрали.
+   b24: handlers.onStep(n, cell) — буква добавлена в путь (звук/вибро
+   в main.js); handlers.onTouch() — игрок коснулся поля (сброс таймера
+   простоя); onFound(word, cells) — вторым аргументом клетки слова (для
+   частиц). demoPath/stopDemo — «призрачный палец» по пути слова вместо
+   модального туториала.
+   b25: handlers.onBackStep(n) — игрок провёл назад и снял последнюю
+   букву пути (для аналитики: undos в level_win).
    ============================================================ */
 
 window.Board = (function () {
@@ -27,6 +34,7 @@ window.Board = (function () {
   }
 
   function render(level, h) {
+    stopDemo();
     current = level;
     handlers = h || {};
     found = {};
@@ -96,6 +104,7 @@ window.Board = (function () {
   }
 
   function clear() {
+    stopDemo();
     if (boardEl) boardEl.innerHTML = '';
     current = null;
     path = [];
@@ -122,6 +131,8 @@ window.Board = (function () {
     var cell = cellFromTarget(e.target) || cellFromPoint(e.clientX, e.clientY);
     if (!cell) return;
     e.preventDefault();
+    stopDemo();
+    if (handlers.onTouch) handlers.onTouch();
     dragging = true;
     clearActive();
     path = [];
@@ -172,6 +183,11 @@ window.Board = (function () {
   function addCell(cell) {
     path.push({ r: +cell.dataset.r, c: +cell.dataset.c, el: cell });
     cell.classList.add('active');
+    // b24: «щелчок» клетки при добавлении — перезапуск CSS-анимации tick.
+    cell.classList.remove('tick');
+    void cell.offsetWidth;
+    cell.classList.add('tick');
+    if (handlers.onStep) handlers.onStep(path.length, cell);
   }
   function tryExtend(cell) {
     // Найденные (зелёные) клетки непроходимы — нельзя пройти/заехать на них.
@@ -180,7 +196,11 @@ window.Board = (function () {
     if (path.length === 0) { addCell(cell); return; }
     if (path.length >= 2) {
       var prev = path[path.length - 2];
-      if (prev.r === r && prev.c === c) { path.pop().el.classList.remove('active'); return; }
+      if (prev.r === r && prev.c === c) {
+        path.pop().el.classList.remove('active');
+        if (handlers.onBackStep) handlers.onBackStep(path.length);   // b25: откат буквы — счёт undos
+        return;
+      }
     }
     if (inPath(r, c) !== -1) return;
     var tail = path[path.length - 1];
@@ -213,15 +233,24 @@ window.Board = (function () {
           return false;
         }
         found[w.word] = true;
+        var foundCells = [];
         for (var k = 0; k < path.length; k++) {
-          path[k].el.classList.remove('active');
-          path[k].el.classList.remove('hint');   // снять янтарную подсказку
-          path[k].el.classList.add('found');
+          var fe = path[k].el;
+          fe.classList.remove('active');
+          fe.classList.remove('hint');   // снять янтарную подсказку
+          fe.classList.remove('tick');
+          fe.classList.add('found');
+          // b24: волна по слову — клетки подпрыгивают по очереди. Класс не
+          // снимаем: иначе вернулась бы базовая анимация появления поля
+          // (cell-in) и клетка мигнула бы; найденная клетка больше не меняется.
+          fe.style.animationDelay = (k * 45) + 'ms';
+          fe.classList.add('found-wave');
+          foundCells.push(fe);
         }
         var n = 0; for (var key in found) if (found.hasOwnProperty(key)) n++;
         var total = current.words.length;
         if (handlers.onProgress) handlers.onProgress(n, total);
-        if (handlers.onFound) handlers.onFound(w.word);
+        if (handlers.onFound) handlers.onFound(w.word, foundCells);
         if (n >= total && handlers.onComplete) handlers.onComplete();
         return w.word;
       }
@@ -291,6 +320,92 @@ window.Board = (function () {
     return any;
   }
 
+  /* ---------- «Призрачный палец» (b24, FTUE без текста) ----------
+     Вместо модального «Как играть» палец сам проводит по буквам нужного
+     слова на НАСТОЯЩЕМ поле: клетки пути подсвечиваются следом, пауза,
+     повтор — пока игрок не коснётся поля (onDown зовёт stopDemo). Игрок
+     видит и жест, и то, какое слово искать, не читая ни строки и не
+     нажимая «Понятно». При reduced-motion палец не ездит — путь просто
+     подсвечен неподвижно. */
+  var demo = null;   // { timers: [], finger: el, cells: [] }
+
+  function cellAt(rc) {
+    return boardEl ? boardEl.querySelector('.cell[data-r="' + rc[0] + '"][data-c="' + rc[1] + '"]') : null;
+  }
+
+  function stopDemo() {
+    if (!demo) return;
+    for (var i = 0; i < demo.timers.length; i++) clearTimeout(demo.timers[i]);
+    for (var j = 0; j < demo.cells.length; j++) demo.cells[j].classList.remove('ghost');
+    if (demo.finger && demo.finger.parentNode) demo.finger.parentNode.removeChild(demo.finger);
+    demo = null;
+  }
+
+  function demoPath(word) {
+    stopDemo();
+    if (!current || !word || !wrapEl || typeof setTimeout !== 'function') return false;
+    var entry = null;
+    for (var i = 0; i < current.words.length; i++) {
+      if (current.words[i].word === word) { entry = current.words[i]; break; }
+    }
+    if (!entry || found[entry.word]) return false;
+    var cells = [];
+    for (var j = 0; j < entry.path.length; j++) {
+      var el = cellAt(entry.path[j]);
+      if (el) cells.push(el);
+    }
+    if (!cells.length) return false;
+    demo = { timers: [], finger: null, cells: cells };
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (reduced || typeof cells[0].getBoundingClientRect !== 'function') {
+      for (var k = 0; k < cells.length; k++) cells[k].classList.add('ghost');
+      return true;
+    }
+    var finger = document.createElement('div');
+    finger.className = 'ghost-finger';
+    finger.setAttribute('aria-hidden', 'true');
+    wrapEl.appendChild(finger);
+    demo.finger = finger;
+    var d = demo;
+
+    function centerOf(el) {
+      var a = el.getBoundingClientRect(), b = wrapEl.getBoundingClientRect();
+      return { x: a.left - b.left + a.width / 2, y: a.top - b.top + a.height / 2 };
+    }
+    function later(fn, ms) { d.timers.push(setTimeout(fn, ms)); }
+    // Только позиция; сжатие «нажатия» — класс press (--gs в style.css).
+    function place(p) {
+      finger.style.setProperty('--gx', p.x + 'px');
+      finger.style.setProperty('--gy', p.y + 'px');
+    }
+    var STEP = 360;
+    function cycle() {
+      if (demo !== d) return;
+      d.timers = [];
+      for (var c = 0; c < cells.length; c++) cells[c].classList.remove('ghost');
+      var p0 = centerOf(cells[0]);
+      finger.classList.remove('moving');
+      place(p0);
+      finger.classList.remove('press');
+      finger.classList.add('show');
+      later(function () { finger.classList.add('press', 'moving'); cells[0].classList.add('ghost'); }, 350);
+      for (var s = 1; s < cells.length; s++) {
+        (function (idx) {
+          later(function () {
+            place(centerOf(cells[idx]));
+            later(function () { cells[idx].classList.add('ghost'); }, STEP * 0.6);
+          }, 350 + idx * STEP);
+        })(s);
+      }
+      var end = 350 + cells.length * STEP + 250;
+      later(function () { finger.classList.remove('press'); finger.classList.remove('show'); }, end);
+      later(cycle, end + 900);
+    }
+    cycle();
+    return true;
+  }
+
   // fit — наружу: main.js пересчитывает поле, когда меняется полоса под баннер (b23).
-  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent, fit: fit };
+  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent, fit: fit,
+           demoPath: demoPath, stopDemo: stopDemo };
 })();

@@ -40,15 +40,25 @@
      load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value;
                                  dev-режим (!ready) → localStorage[slovohod_dev_save_vk]
      showInterstitial          → VKWebAppShowNativeAds {ad_format:'interstitial'}
-                                 + watchdog 40000мс, onResume(wasShown)
+                                 + watchdog 40000мс, onResume(wasShown, outcome)
+                                 (b25: outcome 'not_shown' при result === false —
+                                 кулдаун как при показе, цели аналитики нет)
      showRewarded              → VKWebAppShowNativeAds {ad_format:'reward'}
                                  result.result === true → досмотрено, награда;
                                  result !== true → показан, но не досмотрен → БЕЗ награды;
-                                 reject/таймаут → награда БЕСПЛАТНО (ЭТАП 2, п.1.1)
+                                 reject/таймаут → награда БЕСПЛАТНО (ЭТАП 2, п.1.1).
+                                 onResume(outcome) — исход для аналитики (b25):
+                                 'reward' | 'closed' | 'error' | 'timeout' | 'dev'
      showBanner(onInset)        → VKWebAppShowBannerAd {banner_location:'bottom', layout_type:'resize'};
                                   onInset(px) — сколько баннер перекрывает снизу (0 при resize).
+                                  ПК (vk_platform=desktop_*) — баннер не запрашивается.
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
                                  interstitial/rewarded, вызывается один раз при старте.
+     haptic(kind)              → 'select' → VKWebAppTapticSelectionChanged {};
+                                 'light'/'medium' → VKWebAppTapticImpactOccurred {style};
+                                 'success'/'error' → VKWebAppTapticNotificationOccurred {type}.
+                                 Fire-and-forget; после первого отказа taptic выключен до
+                                 конца сессии (десктопный веб-ВК); dev (!ready) → navigator.vibrate.
      canPurchase()/purchase()   → присутствуют в контракте (см. примечание выше), в этой
                                  сборке main.js их не вызывает.
      gameplayStart/Stop        → no-op
@@ -101,6 +111,15 @@ window.Platform = (() => {
   function hasBridge() {
     return typeof vkBridge !== 'undefined';
   }
+
+  /* Query фрейма — снимок при загрузке адаптера (b25). analytics.js
+     после Game Ready убирает из адреса параметры запуска ВК (sign, vk_*),
+     чтобы их не прочитал tag.js Метрики. getLang() и isDesktop() читают
+     этот снимок, а не живой location.search, — от порядка вызовов
+     относительно Analytics.start() они не зависят. */
+  const LAUNCH_SEARCH = (() => {
+    try { return String(location.search || ''); } catch (_) { return ''; }
+  })();
 
   let ready = false;
   let rewardedAvailable = false;
@@ -160,10 +179,11 @@ window.Platform = (() => {
   function gameReady() {}
 
   /* ---------- Язык ----------
-     VK передаёт vk_language в URL синхронно — не нужен async. */
+     VK передаёт vk_language в URL синхронно — не нужен async (снимок
+     адреса — LAUNCH_SEARCH). */
   function getLang() {
     try {
-      const p = new URLSearchParams(location.search);
+      const p = new URLSearchParams(LAUNCH_SEARCH);
       const l = p.get('vk_language');
       if (l) return l.slice(0, 2);
     } catch (_) {}
@@ -241,10 +261,16 @@ window.Platform = (() => {
   /* ---------- Реклама ----------
      VK Bridge: Promise резолвится ПОСЛЕ закрытия рекламы.
      onPause → send → onResume → если result.result=true → onRewarded. */
+  /* b25: onResume(wasShown, outcome). wasShown — как в b24: любой resolve
+     моста = показ (двигает кулдаун и гейт в main.js, это монетизация —
+     не менять). outcome — только для аналитики: 'shown' (resolve без
+     явного отказа), 'not_shown' (resolve с result === false — по доке ВК
+     «Ошибка при показе»), 'error' (reject), 'timeout', 'dev' (SDK нет).
+     Цель interstitial_shown main.js не шлёт при 'not_shown'. */
   function showInterstitial(onPause, onResume) {
     if (!ready) {
       console.warn('[platform] dev: interstitial пропущен');
-      if (onResume) onResume(false);
+      if (onResume) onResume(false, 'dev');
       return;
     }
     if (onPause) onPause();
@@ -252,22 +278,28 @@ window.Platform = (() => {
     // Единая точка выхода: settle-once. Опоздавший ответ моста ПОСЛЕ
     // сработавшего таймаута не снимет паузу второй раз и не сдвинет
     // кулдаун гейта в main.js повторно.
-    const finish = (wasShown, reason) => {
+    const finish = (wasShown, reason, outcome) => {
       if (settled) return;
       settled = true;
       console.log('[platform] interstitial завершён:', reason, '| показан:', wasShown);
-      if (onResume) onResume(wasShown);
+      if (onResume) onResume(wasShown, outcome);
     };
     withTimeout(
       vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' }),
       AD_HANG_TIMEOUT_MS,
     )
-      .then(() => finish(true, 'реклама закрыта (resolve)'))
+      .then((res) => {
+        if (res && res.result === false) {
+          finish(true, 'мост ответил result=false (кулдаун как при показе, цели нет)', 'not_shown');
+        } else {
+          finish(true, 'реклама закрыта (resolve)', 'shown');
+        }
+      })
       .catch((e) => {
         console.warn('[platform] interstitial недоступен/завис:', e);
         // wasShown=false — показ НЕ состоялся: main.js не двигает
         // кулдаун и счётчик гейта (см. ЭТАП 2, п.1.3).
-        finish(false, 'ошибка/таймаут');
+        finish(false, 'ошибка/таймаут', (e && e.message === 'timeout') ? 'timeout' : 'error');
       });
   }
 
@@ -281,20 +313,24 @@ window.Platform = (() => {
      Кнопка при этом не прячется, подпись ролик не обещает (main.js).
      Предпроверка isRewardedAvailable() остаётся первым эшелоном —
      здесь runtime-фолбэк на ФАКТИЧЕСКИЙ сбой показа. */
+  /* b25: onResume(outcome) несёт исход показа для аналитики — 'reward'
+     (досмотрен), 'closed' (показан, не досмотрен), 'error' (отказ
+     моста), 'timeout' (мост не ответил), 'dev' (SDK нет). На выдачу
+     награды исход не влияет: правило выше не меняется. */
   function showRewarded(onRewarded, onPause, onResume) {
     if (!ready) {
       console.warn('[platform] dev: rewarded → награда выдана');
       if (onRewarded) onRewarded();
-      if (onResume) onResume();
+      if (onResume) onResume('dev');
       return;
     }
     if (onPause) onPause();
     let settled = false;
-    const finish = (grantReward, reason) => {
+    const finish = (grantReward, reason, outcome) => {
       if (settled) return;
       settled = true;
       // Видимый эффект — строго после onResume(), как в platform.js.
-      if (onResume) onResume();
+      if (onResume) onResume(outcome);
       console.log('[platform] rewarded завершён:', reason, '| награда:', grantReward);
       if (grantReward && onRewarded) onRewarded();
     };
@@ -304,14 +340,15 @@ window.Platform = (() => {
     )
       .then((res) => {
         if (res && res.result === true) {
-          finish(true, 'ролик досмотрен (result=true)');
+          finish(true, 'ролик досмотрен (result=true)', 'reward');
         } else {
-          finish(false, 'ролик показан, но не досмотрен (result!=true) — награды нет');
+          finish(false, 'ролик показан, но не досмотрен (result!=true) — награды нет', 'closed');
         }
       })
       .catch((e) => {
         console.warn('[platform] rewarded недоступна/зависла — выдаём подсказку бесплатно:', e);
-        finish(true, 'ошибка/таймаут — выдано бесплатно');
+        finish(true, 'ошибка/таймаут — выдано бесплатно',
+          (e && e.message === 'timeout') ? 'timeout' : 'error');
       });
   }
 
@@ -346,10 +383,33 @@ window.Platform = (() => {
      layout_type:'resize' — клиент VK сам уменьшает область мини-аппа под
      баннер, вручную резервировать место в CSS не нужно.
      Params сверены по исходникам @vkontakte/vk-bridge
-     (packages/core/src/types/data.ts): ShowBannerAdRequest. */
+     (packages/core/src/types/data.ts): ShowBannerAdRequest.
+     ПК-версия ВК (vk_platform=desktop_*) — БЕЗ баннера (решение основателя
+     25.09). Вертикальный справа ({layout_type:'overlay', banner_align:
+     'right', orientation:'vertical'}, по доке) живой ВК на ПК отклонял
+     (b26/b28, адблок выключен) — ветку убрали целиком. */
+  function isDesktop() {
+    try {
+      const p = new URLSearchParams(LAUNCH_SEARCH).get('vk_platform') || '';
+      return p.indexOf('desktop_') === 0;   // desktop_web, desktop_web_messenger, desktop_app_messenger
+    } catch (_) { return false; }
+  }
+
+  function asText(v) {
+    try {
+      const t = JSON.stringify(v);
+      if (t && t !== '{}') return t;
+    } catch (_) {}
+    return (v && v.message) ? String(v.message) : String(v);
+  }
+
   function showBanner(onInset) {
     if (!ready) {
       console.warn('[platform] dev: banner пропущен');
+      return;
+    }
+    if (isDesktop()) {
+      console.log('[platform] banner: ПК-версия — без баннера');
       return;
     }
     // b23 (решение основателя 13.09): баннер СНИЗУ на постоянной основе.
@@ -363,11 +423,67 @@ window.Platform = (() => {
     }).then((r) => {
       const overlay = !!(r && r.layout_type === 'overlay');
       const h = (overlay && typeof r.banner_height === 'number') ? r.banner_height : 0;
-      console.log('[platform] banner: ' + JSON.stringify(r) + ' → полоса снизу ' + h + 'px');
+      console.log('[platform] banner: ' + asText(r) + ' → полоса снизу ' + h + 'px');
       if (typeof onInset === 'function') onInset(h);
     }).catch((e) => {
-      console.warn('[platform] banner недоступен:', e);
+      console.warn('[platform] banner недоступен: ' + asText(e));
     });
+  }
+
+  /* ---------- Тактильный отклик (b24) ----------
+     haptic(kind): 'select' | 'light' | 'medium' | 'success' | 'error';
+     неизвестный kind — no-op. Fire-and-forget: возвращает undefined,
+     никогда не бросает и не ждёт — промис моста гасится .catch.
+     Taptic Engine ВК (типы сверены по packages/core/src/types/data.ts):
+       'select'          → VKWebAppTapticSelectionChanged {}
+       'light'/'medium'  → VKWebAppTapticImpactOccurred {style}
+       'success'/'error' → VKWebAppTapticNotificationOccurred {type}
+     Десктопный веб-ВК taptic не поддерживает и отвечает отказом — после
+     ПЕРВОГО отказа выключаем taptic до конца сессии: слать заведомо
+     отклоняемый запрос на каждую букву свайпа — шум в мосте и в логе.
+     Dev-режим (!ready) — navigator.vibrate, как у Яндекса.
+     'select' (шаг выделения по буквам) — не чаще раза в
+     HAPTIC_SELECT_GAP_MS. Date.now() здесь не время удержания — now() не нужен. */
+  const HAPTIC_SELECT_GAP_MS = 35;
+  const HAPTIC_VIBRATE = {
+    select: 6, light: 10, medium: 18,
+    success: [14, 40, 22], error: [28, 30, 28],
+  };
+  let _hapticLastSelect = 0;
+  let _tapticOff = false;
+  function tapticFailed(e) {
+    if (_tapticOff) return;   // лог — один раз, даже если отказов в полёте несколько
+    _tapticOff = true;
+    console.warn('[platform] taptic недоступен — тактильный отклик выключен до конца сессии:', e);
+  }
+  function haptic(kind) {
+    try {
+      if (!Object.prototype.hasOwnProperty.call(HAPTIC_VIBRATE, kind)) return;
+      if (kind === 'select') {
+        const t = Date.now();
+        if (t - _hapticLastSelect < HAPTIC_SELECT_GAP_MS) return;
+        _hapticLastSelect = t;
+      }
+      if (!ready) {
+        if (typeof navigator !== 'undefined' && navigator && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(HAPTIC_VIBRATE[kind]);
+        }
+        return;
+      }
+      if (_tapticOff) return;
+      let p;
+      if (kind === 'select') {
+        p = vkBridge.send('VKWebAppTapticSelectionChanged', {});
+      } else if (kind === 'light' || kind === 'medium') {
+        p = vkBridge.send('VKWebAppTapticImpactOccurred', { style: kind });
+      } else {
+        p = vkBridge.send('VKWebAppTapticNotificationOccurred', { type: kind });
+      }
+      if (p && typeof p.catch === 'function') p.catch(tapticFailed);
+    } catch (e) {
+      // синхронный сбой моста — тот же исход, что и отказ промиса
+      if (ready) tapticFailed(e);
+    }
   }
 
   /* ---------- Косметические покупки ----------
@@ -399,7 +515,7 @@ window.Platform = (() => {
     init, gameReady, getLang, isAvailable, isRewardedAvailable,
     save, load,
     showInterstitial, showRewarded, showBanner,
-    now,
+    now, haptic,
     canPurchase, purchase,
     gameplayStart, gameplayStop,
     SAVE_SIZE_GUARD_BYTES, AD_HANG_TIMEOUT_MS,
