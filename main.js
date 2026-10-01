@@ -164,38 +164,105 @@
      является, поэтому по правилу 5 ТЗ включено 'rewarded' и ждёт ответа
      основателя. Переключатель рабочий и покрыт тестами — менять одну строку.
      analytics: цели rewarded_click/rewarded_result те же в обоих режимах
-     (shown → result:'reward'), ничего заводить в Метрике не нужно. */
+     (shown → result:'reward'), ничего заводить в Метрике не нужно.
+
+     b53 (жалоба основателя 01.10: на телефоне «первое нажатие — ничего,
+     после нескольких открывается реклама, после рекламы подсказки нет»):
+       • кнопка сразу показывает, что нажатие принято: «Загружаем рекламу…»,
+         класс is-busy, aria-busy — пока ролик грузится (на телефоне —
+         секунды) и идёт. Повторные нажатия по-прежнему не запускают
+         второй показ, но игрок видит почему;
+       • сторож адаптера (40 с) теперь только снимает паузу: если ролик
+         досмотрен позже, награда приходит опоздавшим onGranted. Итог в
+         аналитику при сторожевом 'timeout' ждёт такого подтверждения
+         AD_LATE_GRACE_MS: пришло — 'reward', нет — 'error'. Так на клик
+         по-прежнему ровно один rewarded_result;
+       • 'noads' (страница открыта не во ВКонтакте, SDK нет совсем) —
+         отдельный текст: «реклама только в игре во ВКонтакте». */
   var BONUS_AD_FORMAT = 'rewarded';
+  var AD_LATE_GRACE_MS = 60000;
   var bonusAdBusy = false;
+  var bonusAdBusyPlace = null;   // 'hint' | 'energy' — чья кнопка в ожидании
+  function setBonusAdBusy(place, on) {
+    bonusAdBusy = on;
+    bonusAdBusyPlace = on ? place : null;
+    var btn = place === 'hint' ? btnHint : btnWallAd;
+    if (btn) {
+      btn.classList.toggle('is-busy', on);
+      if (typeof btn.setAttribute === 'function') {
+        if (on) btn.setAttribute('aria-busy', 'true'); else btn.removeAttribute('aria-busy');
+      }
+    }
+    if (place === 'hint') updateHintLabel(); else renderWallAd();
+  }
+  /* b53 (урок Color Sort 18.07): мост отвечает, когда ролик закрыт, но
+     WebView на телефоне может ещё быть под нативным слоем рекламы — тост
+     «+5 подсказок», звук и подсветка отыграли бы невидимо. Видимый эффект
+     награды — когда страница снова видна, но не позже VISIBLE_WAIT_MS. */
+  var VISIBLE_WAIT_MS = 3000;
+  function whenVisible(fn) {
+    if (typeof document === 'undefined' || document.hidden !== true ||
+        typeof document.addEventListener !== 'function') { fn(); return; }
+    var done = false;
+    var t = null;
+    function go() {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', onVis);
+      fn();
+    }
+    function onVis() { if (document.hidden !== true) go(); }
+    document.addEventListener('visibilitychange', onVis);
+    t = setTimeout(go, VISIBLE_WAIT_MS);
+  }
   function showBonusAd(place, onReward) {
     if (bonusAdBusy) {
       console.log('[ad] бонус-реклама уже идёт — повторный клик (' + place + ') проигнорирован');
       return;
     }
-    bonusAdBusy = true;
+    setBonusAdBusy(place, true);
     track('rewarded_click', { place: place });
-    var resulted = false;
+    var settled = false;    // onResume пришёл — кнопка свободна
+    var resulted = false;   // rewarded_result отправлен — ровно один на клик
     var granted = false;
-    function finish(outcome) {
+    var lateTimer = null;
+    function report(result) {
       if (resulted) return;
       resulted = true;
-      bonusAdBusy = false;
+      if (lateTimer) { clearTimeout(lateTimer); lateTimer = null; }
+      track('rewarded_result', { place: place, result: result });
+    }
+    function finish(outcome) {
+      if (settled) return;
+      settled = true;
+      setBonusAdBusy(place, false);
       var good = (outcome === 'reward' || outcome === 'shown');
-      track('rewarded_result', {
-        place: place,
-        result: good ? 'reward' : (outcome === 'closed' ? 'closed' : 'error'),
-      });
+      if (outcome === 'timeout' && !granted) {
+        // b53: сторож снял паузу, но ролик мог ещё идти — итог скажет его подтверждение.
+        lateTimer = setTimeout(function () { report('error'); }, AD_LATE_GRACE_MS);
+      } else {
+        report(good ? 'reward' : (outcome === 'closed' ? 'closed' : 'error'));
+      }
       // Любой исход без показа (adblock, нет объявлений, пауза между показами,
       // таймаут, закрыт до конца, нет SDK) — бонуса нет, и игрок должен понять
-      // почему. Исключение — только dev-выдача на localhost.
+      // почему. Исключение — только dev-выдача на localhost. Если ролик всё
+      // же досмотрят после сторожа, тост награды заменит это уведомление.
       if (!good && outcome !== 'dev') {
-        showRetentionToast(I18N.t(place === 'hint' ? 'adFailHint' : 'adFailEnergy'), 5200);
+        var key = outcome === 'noads'
+          ? (place === 'hint' ? 'adNoSdkHint' : 'adNoSdkEnergy')
+          : (place === 'hint' ? 'adFailHint' : 'adFailEnergy');
+        showRetentionToast(I18N.t(key), 5200);
       }
     }
     function onGranted() {                   // награда строго один раз
       if (granted) return;
       granted = true;
-      onReward();
+      if (settled && !resulted) {            // сторож уже снял паузу, итог ждал подтверждения
+        console.log('[ad] ' + place + ': показ подтверждён после сторожа — награда выдана');
+        report('reward');
+      }
+      whenVisible(onReward);
     }
     function onPause() { Sound.suspend(); lvClockSet('ad', true); }
     function onResume(outcome) { Sound.resume(); lvClockSet('ad', false); finish(outcome); }
@@ -206,7 +273,7 @@
         Platform.showRewarded(onGranted, onPause, onResume);
       }
     } catch (e) {
-      bonusAdBusy = false;
+      setBonusAdBusy(place, false);
       throw e;
     }
   }
@@ -830,7 +897,8 @@
     if (!btnWallAd) return;
     var left = WALL_ADS_PER_DAY - wallAdsToday();
     btnWallAd.hidden = left <= 0;
-    btnWallAd.textContent = I18N.fill('wallAd', {
+    // b53: пока ролик грузится/идёт — подпись ожидания (см. setBonusAdBusy).
+    btnWallAd.textContent = bonusAdBusyPlace === 'energy' ? I18N.t('adLoading') : I18N.fill('wallAd', {
       n: WALL_AD_ENERGY, lv: I18N.plural(WALL_AD_ENERGY, LV_FORMS),
     });
     if (wallSub) wallSub.textContent = I18N.t(left <= 0 ? 'wallAdDone' : 'energyWallSub');
@@ -1150,6 +1218,8 @@
   // Подпись кнопки подсказки (кнопка сама всегда видна, см. start()).
   function updateHintLabel() {
     if (!btnHint) return;
+    // b53: ролик за подсказку грузится/идёт — кнопка говорит, что нажатие принято.
+    if (bonusAdBusyPlace === 'hint') { btnHint.textContent = I18N.t('adLoading'); return; }
     // b19: золотая подсказка (день 7 календаря) — самая сильная, тратится
     // первой; кнопка честно говорит, что откроет слово целиком.
     if (goldHints > 0) { btnHint.textContent = I18N.t('hintGold'); return; }

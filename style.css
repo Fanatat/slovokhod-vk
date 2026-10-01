@@ -424,6 +424,13 @@ html, body {
   border: 1px solid var(--tile-border);
 }
 .hint-btn:active { transform: scale(0.98); }
+/* b53: нажатие за рекламой принято, ролик грузится/идёт — кнопка
+   приглушена и подписана «Загружаем рекламу…» (main.js setBonusAdBusy).
+   Не disabled: тап по выключенной кнопке на телефоне не даёт отклика. */
+.hint-btn.is-busy,
+#btn-wall-ad.is-busy { opacity: 0.72; cursor: progress; }
+.hint-btn.is-busy:active,
+#btn-wall-ad.is-busy:active { transform: none; }
 
 /* Бейдж бесплатных подсказок (награда серии входов). Скрыт при нуле —
    пустой кружок «0» читался бы как поломка, а не как отсутствие. */

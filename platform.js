@@ -23,8 +23,10 @@
    держим в контракте как задел — в этой сборке (A+B) их никто не вызывает,
    витрины косметики нет, см. отдельную задачу В):
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
-                                 (b26: VKWebAppCheckNativeAds из init убран — он держал
-                                 меню до 1,5 с и больше ни на что не влияет)
+                                 (b26: init НЕ ждёт VKWebAppCheckNativeAds — он держал
+                                 меню до 1,5 с; b53: после init предзагрузка рекламы
+                                 VKWebAppCheckNativeAds reward/interstitial запускается
+                                 в фоне, ничего не ждёт и ни на что не влияет — см. preloadAds)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
      getLang()                 → URL-параметр vk_language или navigator.language
      isAvailable()             → флаг ready после успешного init
@@ -43,6 +45,9 @@
                                  кулдаун как при показе, цели аналитики нет)
      showRewarded              → VKWebAppShowNativeAds {ad_format:'reward'}
                                  result.result === true → досмотрено, награда;
+                                 b53: в том числе если ответ пришёл ПОСЛЕ сторожа
+                                 40 с (на телефоне загрузка + 30 с ролика + финальный
+                                 экран дольше 40 с — раньше награда терялась);
                                  иначе (result:false/пусто, reject, таймаут, adblock) →
                                  награды НЕТ (b26, ТЗ 01.10: «бонус только если реклама
                                  реально показана», бесплатного режима нет).
@@ -117,6 +122,14 @@ window.Platform = (() => {
     return typeof vkBridge !== 'undefined';
   }
 
+  /* Фоновый таймер: в браузере обычный setTimeout; в Node-тестах unref(),
+     чтобы повтор предзагрузки не держал процесс теста живым. */
+  function bgTimer(fn, ms) {
+    const t = setTimeout(fn, ms);
+    if (t && typeof t.unref === 'function') t.unref();
+    return t;
+  }
+
   /* Query фрейма — снимок при загрузке адаптера (b25). analytics.js
      после Game Ready убирает из адреса параметры запуска ВК (sign, vk_*),
      чтобы их не прочитал tag.js Метрики. getLang() и isDesktop() читают
@@ -164,6 +177,9 @@ window.Platform = (() => {
       await withTimeout((early && early.init) || vkBridge.send('VKWebAppInit'), INIT_TIMEOUT);
       ready = true;
       console.log('[platform] VK Bridge init OK');
+      // b53: предзагрузка рекламы — в фоне, init её НЕ ждёт (урок b26).
+      preloadAds('reward');
+      preloadAds('interstitial');
 
       return true;
     } catch (e) {
@@ -194,6 +210,54 @@ window.Platform = (() => {
 
   /* ---------- Доступность ---------- */
   function isAvailable() { return ready; }
+
+  /* ---------- Предзагрузка рекламы (b53) ----------
+     Документация ВК («Реклама в играх → Необходимые события»): без
+     предзагрузки VKWebAppShowNativeAds сначала ЗАГРУЖАЕТ материалы и только
+     потом показывает — «это может приводить к некоторой задержке при старте
+     показа»; «проверка необходима для показа рекламы за вознаграждение»;
+     загрузка может не удаться при плохой сети — «вызывать
+     VKWebAppCheckNativeAds по таймеру». В b26 вызов убрали целиком (он
+     держал меню и решал, выдавать ли подсказку бесплатно), и на телефоне
+     каждое нажатие ждало загрузку ролика по 4–6 с без отклика — игрок жал
+     ещё и ещё (жалоба основателя 01.10, b52).
+     Теперь: fire-and-forget после init и после каждого показа своего
+     формата. Ничего не ждёт, ни на что не влияет (isRewardedAvailable
+     по-прежнему true, награда — только по result === true при показе).
+     Ответ «материалов нет»/ошибка/молчание — повтор через
+     PRELOAD_RETRY_MS, не больше PRELOAD_RETRIES раз подряд. */
+  const PRELOAD_TIMEOUT_MS = 8000;
+  const PRELOAD_RETRY_MS = 30000;
+  const PRELOAD_RETRIES = 5;
+  const preloadState = {};   // формат → { busy, tries, timer }
+  function preloadAds(fmt) {
+    if (!ready || !hasBridge()) return;
+    const s = preloadState[fmt] || (preloadState[fmt] = { busy: false, tries: 0, timer: null });
+    if (s.busy) return;
+    if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+    s.busy = true;
+    let done = false;
+    const end = (okNow, why) => {
+      if (done) return;
+      done = true;
+      clearTimeout(guard);
+      s.busy = false;
+      if (okNow) { s.tries = 0; return; }
+      if (s.tries >= PRELOAD_RETRIES) {
+        console.warn('[platform] предзагрузка ' + fmt + ': ' + why + ' — повторы исчерпаны, ролик загрузится при показе');
+        return;
+      }
+      s.tries++;
+      s.timer = bgTimer(() => { s.timer = null; preloadAds(fmt); }, PRELOAD_RETRY_MS);
+    };
+    const guard = bgTimer(() => end(false, 'мост молчит'), PRELOAD_TIMEOUT_MS);
+    let p;
+    try { p = vkBridge.send('VKWebAppCheckNativeAds', { ad_format: fmt }); } catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(
+      (res) => end(!!(res && res.result === true), 'материалов пока нет'),
+      () => end(false, 'ошибка'),
+    );
+  }
 
   /* ---------- Rewarded-реклама доступна ----------
      b26: всегда true. Раньше кеш VKWebAppCheckNativeAds, и при false
@@ -304,10 +368,10 @@ window.Platform = (() => {
       console.log('[platform] interstitial завершён:', reason, '| показан:', wasShown);
       if (onResume) onResume(wasShown, outcome);
     };
-    withTimeout(
-      vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' }),
-      AD_HANG_TIMEOUT_MS,
-    )
+    const shown = vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
+    // b53: следующий ролик — заранее, когда мост ответил про этот.
+    Promise.resolve(shown).then(() => preloadAds('interstitial'), () => preloadAds('interstitial'));
+    withTimeout(shown, AD_HANG_TIMEOUT_MS)
       .then((res) => {
         if (res && res.result === false) {
           finish(true, 'мост ответил result=false (кулдаун как при показе, цели нет)', 'not_shown');
@@ -332,7 +396,21 @@ window.Platform = (() => {
      кнопка остаётся рабочей — можно нажать снова.
      Единый ход для обоих форматов: onPause → send → onResume(outcome)
      → onGranted (видимый эффект строго после onResume, как в Яндексе).
-     settle-once: опоздавший ответ после таймаута ничего не меняет. */
+
+     b53 (жалоба основателя 01.10, b52 на телефоне: «после рекламы
+     подсказка не появляется»). Сторож AD_HANG_TIMEOUT_MS считал от
+     НАЖАТИЯ и был settle-once для всего: на телефоне ролик грузится
+     несколько секунд, идёт 30 с и заканчивается финальным экраном —
+     больше 40 с. Сторож объявлял «таймаут, награды нет», а пришедший
+     через пару секунд {result:true} выбрасывался: игрок досмотрел
+     рекламу и ничего не получил, и так при каждом повторе. На ПК ролик
+     стартует быстрее и укладывается в 40 с — там всё работало.
+     Теперь сторож отвечает только за то, ради чего заведён (ЭТАП 2,
+     п.1.2): мост молчит — снять паузу и разблокировать игру
+     (onResume('timeout'), ровно один раз). Награда — по подтверждению
+     моста result === true, когда бы оно ни пришло, ровно один раз
+     (QUALITY: «двойной/поздний callback — награда ровно один раз только
+     по подтверждению SDK»). Опоздавший ответ onResume второй раз не зовёт. */
   function runBonusAd(adFormat, okOutcome, failOutcome, onGranted, onPause, onResume) {
     if (!ready) {
       if (devAdsAllowed()) {
@@ -346,27 +424,44 @@ window.Platform = (() => {
       return;
     }
     if (onPause) onPause();
-    let settled = false;
-    const finish = (grant, reason, outcome) => {
+    let settled = false;   // onResume — ровно один раз (ответ моста или сторож)
+    let granted = false;   // награда — ровно один раз и только по result === true
+    let timer = null;
+    const finish = (reason, outcome) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       if (onResume) onResume(outcome);
-      console.log('[platform] ' + adFormat + ' завершён:', reason, '| награда:', grant);
-      if (grant && onGranted) onGranted();
+      console.log('[platform] ' + adFormat + ' завершён: ' + reason);
     };
-    withTimeout(
-      vkBridge.send('VKWebAppShowNativeAds', { ad_format: adFormat }),
-      AD_HANG_TIMEOUT_MS,
-    )
+    const grant = (late) => {
+      if (granted) return;
+      granted = true;
+      console.log('[platform] ' + adFormat + ': награда выдана' +
+        (late ? ' — подтверждение пришло ПОСЛЕ сторожа (долгий ролик)' : ''));
+      if (onGranted) onGranted();
+    };
+    timer = setTimeout(() => {
+      console.warn('[platform] ' + adFormat + ': мост молчит ' + AD_HANG_TIMEOUT_MS +
+        ' мс — пауза снята; если ролик ещё идёт, награда придёт по его подтверждению');
+      finish('сторож ' + AD_HANG_TIMEOUT_MS + ' мс', 'timeout');
+    }, AD_HANG_TIMEOUT_MS);
+    let shown;
+    try { shown = vkBridge.send('VKWebAppShowNativeAds', { ad_format: adFormat }); } catch (e) { shown = Promise.reject(e); }
+    Promise.resolve(shown)
       .then((res) => {
-        if (res && res.result === true) finish(true, 'показана (result=true)', okOutcome);
-        else finish(false, 'мост ответил без result=true — награды нет', failOutcome);
+        const late = settled;
+        if (res && res.result === true) {
+          finish('показана (result=true)', okOutcome);
+          grant(late);
+        } else {
+          finish('мост ответил без result=true — награды нет', failOutcome);
+        }
+      }, (e) => {
+        console.warn('[platform] ' + adFormat + ' недоступна (adblock, нет объявлений) — награды нет:', e);
+        finish('ошибка — награды нет', 'error');
       })
-      .catch((e) => {
-        console.warn('[platform] ' + adFormat + ' недоступна/зависла (adblock, нет объявлений) — награды нет:', e);
-        finish(false, 'ошибка/таймаут — награды нет',
-          (e && e.message === 'timeout') ? 'timeout' : 'error');
-      });
+      .then(() => preloadAds(adFormat));   // b53: следующий ролик — заранее
   }
 
   /* b26: onResume(outcome) — 'reward' | 'closed' | 'error' | 'timeout' |
