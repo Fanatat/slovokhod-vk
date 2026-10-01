@@ -143,42 +143,70 @@
     track('first_move', p);
   }
 
-  /* Rewarded с аналитикой и защитой от двойного клика (b25, п.6 ТЗ).
-     Пока ролик идёт, повторный клик игнорируется: раньше два быстрых
-     клика запускали два показа и две награды. Награда и итог — не
-     больше одного раза на клик, даже если площадка ответит дважды.
-     result: reward | closed | error (таймаут, отказ, нет SDK → error). */
-  var rewardedBusy = false;
-  function showRewardedTracked(place, onReward) {
-    if (rewardedBusy) {
-      console.log('[ad] rewarded уже идёт — повторный клик (' + place + ') проигнорирован');
+  /* Бонус за рекламу (подсказка, запас у стены) — одна точка входа.
+     b25: аналитика и защита от двойного клика. Пока ролик идёт, повторный
+     клик игнорируется: раньше два быстрых клика запускали два показа и две
+     награды. Награда и итог — не больше одного раза на клик.
+
+     b26 (ТЗ 01.10): бонус выдаётся ТОЛЬКО если реклама реально показана.
+     Раньше любой сбой показа (adblock, нет объявлений, таймаут, нет SDK)
+     давал бонус бесплатно — подсказка была бесконечной. Теперь сбой =
+     бонуса нет + уведомление игроку (adFail*). Кнопка остаётся рабочей:
+     можно нажать снова — это же и ответ на «пауза между показами»
+     (Яндекс, wasShown=false): игрок видит мягкую подсказку «повторите»,
+     а не молчание, и бесплатного обхода нет.
+
+     BONUS_AD_FORMAT: 'rewarded' — rewarded-видео (как всегда);
+     'interstitial' — бонус за полноэкранную (решение основателя 01.10).
+     ВНИМАНИЕ: документация ВК разрешает межстраничную «только в момент
+     перехода от одного экрана приложения к другому» (Реклама в играх →
+     «Реклама между экранами»); нажатие кнопки посреди уровня переходом не
+     является, поэтому по правилу 5 ТЗ включено 'rewarded' и ждёт ответа
+     основателя. Переключатель рабочий и покрыт тестами — менять одну строку.
+     analytics: цели rewarded_click/rewarded_result те же в обоих режимах
+     (shown → result:'reward'), ничего заводить в Метрике не нужно. */
+  var BONUS_AD_FORMAT = 'rewarded';
+  var bonusAdBusy = false;
+  function showBonusAd(place, onReward) {
+    if (bonusAdBusy) {
+      console.log('[ad] бонус-реклама уже идёт — повторный клик (' + place + ') проигнорирован');
       return;
     }
-    rewardedBusy = true;
+    bonusAdBusy = true;
     track('rewarded_click', { place: place });
     var resulted = false;
-    var rewarded = false;
+    var granted = false;
     function finish(outcome) {
       if (resulted) return;
       resulted = true;
-      rewardedBusy = false;
+      bonusAdBusy = false;
+      var good = (outcome === 'reward' || outcome === 'shown');
       track('rewarded_result', {
         place: place,
-        result: (outcome === 'reward' || outcome === 'closed') ? outcome : 'error',
+        result: good ? 'reward' : (outcome === 'closed' ? 'closed' : 'error'),
       });
+      // Любой исход без показа (adblock, нет объявлений, пауза между показами,
+      // таймаут, закрыт до конца, нет SDK) — бонуса нет, и игрок должен понять
+      // почему. Исключение — только dev-выдача на localhost.
+      if (!good && outcome !== 'dev') {
+        showRetentionToast(I18N.t(place === 'hint' ? 'adFailHint' : 'adFailEnergy'), 5200);
+      }
     }
+    function onGranted() {                   // награда строго один раз
+      if (granted) return;
+      granted = true;
+      onReward();
+    }
+    function onPause() { Sound.suspend(); lvClockSet('ad', true); }
+    function onResume(outcome) { Sound.resume(); lvClockSet('ad', false); finish(outcome); }
     try {
-      Platform.showRewarded(
-        function () {                          // onRewarded — награда строго один раз
-          if (rewarded) return;
-          rewarded = true;
-          onReward();
-        },
-        function () { Sound.suspend(); lvClockSet('ad', true); },           // onPause
-        function (outcome) { Sound.resume(); lvClockSet('ad', false); finish(outcome); }  // onResume
-      );
+      if (BONUS_AD_FORMAT === 'interstitial' && typeof Platform.showInterstitialBonus === 'function') {
+        Platform.showInterstitialBonus(onGranted, onPause, onResume);
+      } else {
+        Platform.showRewarded(onGranted, onPause, onResume);
+      }
     } catch (e) {
-      rewardedBusy = false;
+      bonusAdBusy = false;
       throw e;
     }
   }
@@ -494,6 +522,7 @@
 
   var LV_FORMS = ['новый уровень', 'новых уровня', 'новых уровней'];
   var HINT_FORMS = ['подсказка', 'подсказки', 'подсказок'];
+  var AD_HINTS_REWARD = 5;     // b27: подсказок за один просмотр rewarded (решение основателя 01.10)
   var DAY_FORMS = ['день', 'дня', 'дней'];
 
   /* Индикатор запаса: ОДНА функция обновляет ВСЕ инстансы разом (меню,
@@ -810,7 +839,7 @@
   function onWallAdClick() {
     if (wallAdsToday() >= WALL_ADS_PER_DAY) { renderWallAd(); return; }
     Sound.resumeContext();
-    showRewardedTracked('energy',
+    showBonusAd('energy',
       // Награда — ТОЛЬКО в onRewarded (стандарт контракта). Адаптеры
       // зовут onResume раньше onRewarded, поэтому рендер здесь, не там.
       function () {
@@ -841,7 +870,7 @@
   }
 
   var toastTimer = null;
-  function showRetentionToast(text) {
+  function showRetentionToast(text, ms) {
     if (!retentionToast) return;
     retentionToast.textContent = text;
     retentionToast.hidden = false;
@@ -853,7 +882,7 @@
     toastTimer = setTimeout(function () {
       retentionToast.classList.remove('is-visible');
       toastTimer = setTimeout(function () { retentionToast.hidden = true; }, 400);
-    }, 2800);
+    }, ms || 2800);
   }
 
   function grantBonusHints(n, day) {
@@ -1118,8 +1147,7 @@
     if (elMenuMore) elMenuMore.hidden = !(Levels.count() > 0 && maxUnlocked >= Levels.count());
   }
 
-  // Подпись кнопки подсказки: обещает ролик только если реклама реально
-  // доступна (задача А, п.180) — кнопка сама всегда видна, см. start().
+  // Подпись кнопки подсказки (кнопка сама всегда видна, см. start()).
   function updateHintLabel() {
     if (!btnHint) return;
     // b19: золотая подсказка (день 7 календаря) — самая сильная, тратится
@@ -1128,7 +1156,7 @@
     // ЭТАП 3: пока есть бесплатные подсказки из серии входов, кнопка НЕ
     // обещает ролик — она его и не покажет (баланс тратится первым).
     if (bonusHints > 0) { btnHint.textContent = I18N.t('hintBonusHint'); return; }
-    btnHint.textContent = I18N.t(Platform.isRewardedAvailable() ? 'hint' : 'hintFree');
+    btnHint.textContent = I18N.t('hint');   // b26: подпись всегда честная — подсказка только за рекламу
   }
 
   /* ============================================================
@@ -1767,12 +1795,8 @@
       I18N.apply(document);
 
       if (!Platform.isAvailable() && devBadge) devBadge.hidden = false;
-      // Кнопка подсказки НИКОГДА не прячется (задача А, смена стандарта
-      // п.180): при adblock/отсутствии филла VKWebAppCheckNativeAds
-      // исторически ложно сообщает "недоступно" даже когда реклама
-      // реально показывается — прятать кнопку по этому сигналу нельзя.
-      // Подпись лишь не обещает ролик, если реклама недоступна; сама
-      // подсказка в этом случае бесплатна (см. обработчик клика ниже).
+      // Кнопка подсказки НИКОГДА не прячется. b26: и «доступность рекламы»
+      // больше не проверяется — реклама пробуется при каждом нажатии.
       updateHintLabel();
 
       showScreen(elMenu);
@@ -1962,9 +1986,8 @@
     );
   });
 
-  // Подсказка за rewarded-видео (п.4.5): по желанию смотрим ролик → подсвечивается буква.
-  // Если реклама недоступна (adblock/нет филла) — подсказка бесплатна (п.190,
-  // задача А), ролик не пытаемся показывать вовсе: кнопка это не обещает.
+  // Подсказка за рекламу (п.4.5): по желанию смотрим ролик → подсвечивается буква.
+  // b26: рекламы нет (adblock/нет филла/ошибка) → подсказки нет + уведомление.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
     /* b19: золотая подсказка (день 7 календаря) — открывает целевое
@@ -1997,16 +2020,21 @@
       snd('hint');
       return;
     }
-    if (!Platform.isRewardedAvailable()) {
+    // b26: ветки «реклама недоступна → подсказка бесплатно» больше нет (ТЗ 01.10):
+    // реклама пробуется всегда, подсказка — только если она показана.
+    // b25: через showBonusAd — цели rewarded_* и защита от двойного клика.
+    // b27 (раунд 2, 01.10): за ОДИН просмотр — AD_HINTS_REWARD подсказок: одна
+    // открывается сразу, остальные падают в баланс bonusHints (тратятся без рекламы).
+    showBonusAd('hint', function () {   // onRewarded — chain[chainPos]
+      bonusHints += AD_HINTS_REWARD - 1;
       hintsUsed++;
+      persistProgress();
+      renderHintBadge();
+      updateHintLabel();
       Board.revealHint(hintWord);
       snd('hint');
-      return;
-    }
-    // b25: через showRewardedTracked — цели rewarded_* и защита от двойного клика.
-    showRewardedTracked('hint',
-      function () { hintsUsed++; Board.revealHint(hintWord); snd('hint'); } // onRewarded — chain[chainPos]
-    );
+      showRetentionToast(I18N.fill('dailyHints', { n: AD_HINTS_REWARD, hint: I18N.plural(AD_HINTS_REWARD, HINT_FORMS) }), 2600);
+    });
   });
 
   // b19: «Забрать» награду дня — первый жест сессии, заодно разрешает звук.

@@ -578,7 +578,9 @@ html, body {
   top: max(14px, env(safe-area-inset-top));
   transform: translate(-50%, -12px);
   z-index: 40;
-  max-width: 88vw;
+  width: max-content;   /* b26: left:50% ужимал плашку вдвое — длинное уведомление шло в 7 строк */
+  max-width: min(88vw, 420px);
+  text-align: center;   /* b26: уведомление «реклама не показалась» в 2–3 строки */
   padding: 10px 16px;
   border-radius: var(--radius);
   border: 1px solid var(--tile-border);

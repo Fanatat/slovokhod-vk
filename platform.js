@@ -23,18 +23,16 @@
    держим в контракте как задел — в этой сборке (A+B) их никто не вызывает,
    витрины косметики нет, см. отдельную задачу В):
      init()                    → VKWebAppInit + isEmbedded guard + 2.5s timeout
-                                 + VKWebAppCheckNativeAds (доступность rewarded)
+                                 (b26: VKWebAppCheckNativeAds из init убран — он держал
+                                 меню до 1,5 с и больше ни на что не влияет)
      gameReady()               → no-op (у VK нет аналога Yandex LoadingAPI)
      getLang()                 → URL-параметр vk_language или navigator.language
      isAvailable()             → флаг ready после успешного init
-     isRewardedAvailable()     → VKWebAppCheckNativeAds {ad_format:'reward'} (кешируется при init).
-                                 ТОЛЬКО для подписи кнопки (задача А, п.180) — main.js
-                                 больше НЕ прячет кнопку подсказки по этому флагу: сама
-                                 проверка исторически ненадёжна (ложные false при adblock —
-                                 известный баг VKWebAppCheckNativeAds, github.com/VKCOM/
-                                 vk-bridge/issues/243), а при false подсказка выдаётся
-                                 бесплатно без попытки показать ролик.
-                                 dev-режим (!ready) → true (label "за рекламу" для тестирования)
+     isRewardedAvailable()     → всегда true (b26). Раньше — кеш VKWebAppCheckNativeAds,
+                                 и при false подсказка выдавалась БЕЗ рекламы (дыра: на
+                                 телефоне подсказка была бесконечной). Проверка исторически
+                                 ненадёжна (github.com/VKCOM/vk-bridge/issues/243); теперь
+                                 реклама просто пробуется при каждом нажатии.
      save(fullState)           → VKWebAppStorageSet {key, value};
                                  dev-режим (!ready) → localStorage[slovohod_dev_save_vk]
      load()                    → VKWebAppStorageGet {keys:[KEY]} → keys[0].value;
@@ -45,10 +43,17 @@
                                  кулдаун как при показе, цели аналитики нет)
      showRewarded              → VKWebAppShowNativeAds {ad_format:'reward'}
                                  result.result === true → досмотрено, награда;
-                                 result !== true → показан, но не досмотрен → БЕЗ награды;
-                                 reject/таймаут → награда БЕСПЛАТНО (ЭТАП 2, п.1.1).
-                                 onResume(outcome) — исход для аналитики (b25):
-                                 'reward' | 'closed' | 'error' | 'timeout' | 'dev'
+                                 иначе (result:false/пусто, reject, таймаут, adblock) →
+                                 награды НЕТ (b26, ТЗ 01.10: «бонус только если реклама
+                                 реально показана», бесплатного режима нет).
+                                 SDK нет (!ready) → награды нет, кроме localhost/file://
+                                 (devAdsAllowed). onResume(outcome) — исход:
+                                 'reward' | 'closed' | 'error' | 'timeout' | 'noads'
+     showInterstitialBonus     → то же, но формат 'interstitial' (b26, запасной путь
+                                 «бонус за межстраничную»; в игре выключен, см. main.js
+                                 BONUS_AD_FORMAT). Награда ТОЛЬКО при result === true.
+                                 onResume(outcome): 'shown' | 'not_shown' | 'error' |
+                                 'timeout' | 'noads'
      showBanner(onInset)        → VKWebAppShowBannerAd {banner_location:'bottom', layout_type:'resize'};
                                   onInset(px) — сколько баннер перекрывает снизу (0 при resize).
                                   ПК (vk_platform=desktop_*) — баннер не запрашивается.
@@ -121,8 +126,14 @@ window.Platform = (() => {
     try { return String(location.search || ''); } catch (_) { return ''; }
   })();
 
+  /* Ранний старт (b26): window.__vkEarly = { init, load, key } кладёт тег из
+     index.html. load — промис VKWebAppStorageGet по ключу key; берётся ОДИН
+     раз и только если key совпадает с STORAGE_KEY (иначе — читаем сами). */
+  function earlyStart() {
+    try { return (typeof window !== 'undefined' && window.__vkEarly) || null; } catch (_) { return null; }
+  }
+
   let ready = false;
-  let rewardedAvailable = false;
 
   /* ---------- Инициализация ----------
      Порядок защит:
@@ -146,23 +157,14 @@ window.Platform = (() => {
     // оставлял таймер висеть даже при штатном ответе — в Node-тестах
     // это держало event loop, а в браузере зря удерживало замыкание.
     try {
-      await withTimeout(vkBridge.send('VKWebAppInit'), INIT_TIMEOUT);
+      // b26: рукопожатие уже может лететь — его запускает тег в index.html
+      // сразу после vk-bridge.min.js (build.py:VK_EARLY_INIT). Забираем тот же
+      // промис; нет раннего старта (тесты, локальный запуск) — шлём сами.
+      const early = earlyStart();
+      await withTimeout((early && early.init) || vkBridge.send('VKWebAppInit'), INIT_TIMEOUT);
       ready = true;
       console.log('[platform] VK Bridge init OK');
 
-      // Проверяем доступность rewarded-рекламы сразу при init, кешируем результат.
-      // https://dev.vk.com/bridge/VKWebAppCheckNativeAds
-      try {
-        const check = await withTimeout(
-          vkBridge.send('VKWebAppCheckNativeAds', { ad_format: 'reward' }),
-          1500,
-        );
-        rewardedAvailable = check.result === true;
-        console.log('[platform] rewarded доступен:', rewardedAvailable);
-      } catch (e) {
-        rewardedAvailable = false;
-        console.warn('[platform] VKWebAppCheckNativeAds:', e.message || e);
-      }
       return true;
     } catch (e) {
       if (e.message === 'timeout') {
@@ -194,11 +196,22 @@ window.Platform = (() => {
   function isAvailable() { return ready; }
 
   /* ---------- Rewarded-реклама доступна ----------
-     Кеш заполняется в init() через VKWebAppCheckNativeAds.
-     В dev-режиме (!ready) возвращаем true: кнопка видна, подсказка выдаётся бесплатно. */
-  function isRewardedAvailable() {
-    if (!ready) return true;
-    return rewardedAvailable;
+     b26: всегда true. Раньше кеш VKWebAppCheckNativeAds, и при false
+     main.js выдавал подсказку БЕЗ рекламы — на телефоне она становилась
+     бесконечной (ТЗ 01.10). Теперь реклама пробуется при каждом нажатии,
+     а исход решает, выдавать ли бонус. Метод оставлен в контракте. */
+  function isRewardedAvailable() { return true; }
+
+  /* ---------- Dev-режим рекламы (b26) ----------
+     Бесплатная выдача без SDK — ТОЛЬКО для локальной разработки: страница
+     открыта с localhost/127.0.0.1/file://. Стенд (github.io) и любая
+     площадка сюда не попадают: там «рекламы нет» = «бонуса нет». */
+  function devAdsAllowed() {
+    try {
+      if (location.protocol === 'file:') return true;
+      const h = location.hostname;
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+    } catch (_) { return false; }
   }
 
   /* ---------- Сохранение ----------
@@ -249,7 +262,14 @@ window.Platform = (() => {
       }
     }
     try {
-      const res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
+      let res = null;
+      const early = earlyStart();
+      if (early && early.load && early.key === STORAGE_KEY) {
+        const pending = early.load;
+        early.load = null;   // один раз: повторный load() читает заново
+        try { res = await pending; } catch (_) { res = null; }   // не вышло — ниже обычный запрос
+      }
+      if (!res) res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
       const raw = res.keys && res.keys[0] && res.keys[0].value;
       return raw ? JSON.parse(raw) : null;
     } catch (e) {
@@ -303,53 +323,66 @@ window.Platform = (() => {
       });
   }
 
-  /* Целевое правило рекламы (ЭТАП 2, п.1.1, стандарт студии, эталон
-     Color Sort/vk_platform.js): удержание награды законно ТОЛЬКО при
-     явном ответе площадки «ролик показан, но не досмотрен» — у ВК это
-     УСПЕШНО разрешившийся промис с res.result !== true (осознанный
-     отказ игрока). Все прочие пути — reject (нет филла, adblock,
-     ошибка моста), таймаут, отсутствие SDK — выдают подсказку
-     БЕСПЛАТНО: недоступная реклама не должна быть тупиком для игрока.
-     Кнопка при этом не прячется, подпись ролик не обещает (main.js).
-     Предпроверка isRewardedAvailable() остаётся первым эшелоном —
-     здесь runtime-фолбэк на ФАКТИЧЕСКИЙ сбой показа. */
-  /* b25: onResume(outcome) несёт исход показа для аналитики — 'reward'
-     (досмотрен), 'closed' (показан, не досмотрен), 'error' (отказ
-     моста), 'timeout' (мост не ответил), 'dev' (SDK нет). На выдачу
-     награды исход не влияет: правило выше не меняется. */
-  function showRewarded(onRewarded, onPause, onResume) {
+  /* Бонус за рекламу (b26, ТЗ 01.10): награда выдаётся ТОЛЬКО если
+     площадка реально показала рекламу. Раньше (ЭТАП 2, п.1.1) любой
+     сбой показа — reject, adblock, таймаут, нет SDK — выдавал награду
+     бесплатно «чтобы не было тупика»; это и была дыра с бесконечной
+     подсказкой. Теперь тупика нет иначе: main.js показывает игроку
+     уведомление «отключите блокировщик / повторите», бонус не выдан,
+     кнопка остаётся рабочей — можно нажать снова.
+     Единый ход для обоих форматов: onPause → send → onResume(outcome)
+     → onGranted (видимый эффект строго после onResume, как в Яндексе).
+     settle-once: опоздавший ответ после таймаута ничего не меняет. */
+  function runBonusAd(adFormat, okOutcome, failOutcome, onGranted, onPause, onResume) {
     if (!ready) {
-      console.warn('[platform] dev: rewarded → награда выдана');
-      if (onRewarded) onRewarded();
-      if (onResume) onResume('dev');
+      if (devAdsAllowed()) {
+        console.warn('[platform] dev (localhost): ' + adFormat + ' → награда выдана');
+        if (onGranted) onGranted();
+        if (onResume) onResume('dev');
+      } else {
+        console.warn('[platform] SDK нет — ' + adFormat + ' не показать, награды нет');
+        if (onResume) onResume('noads');
+      }
       return;
     }
     if (onPause) onPause();
     let settled = false;
-    const finish = (grantReward, reason, outcome) => {
+    const finish = (grant, reason, outcome) => {
       if (settled) return;
       settled = true;
-      // Видимый эффект — строго после onResume(), как в platform.js.
       if (onResume) onResume(outcome);
-      console.log('[platform] rewarded завершён:', reason, '| награда:', grantReward);
-      if (grantReward && onRewarded) onRewarded();
+      console.log('[platform] ' + adFormat + ' завершён:', reason, '| награда:', grant);
+      if (grant && onGranted) onGranted();
     };
     withTimeout(
-      vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' }),
+      vkBridge.send('VKWebAppShowNativeAds', { ad_format: adFormat }),
       AD_HANG_TIMEOUT_MS,
     )
       .then((res) => {
-        if (res && res.result === true) {
-          finish(true, 'ролик досмотрен (result=true)', 'reward');
-        } else {
-          finish(false, 'ролик показан, но не досмотрен (result!=true) — награды нет', 'closed');
-        }
+        if (res && res.result === true) finish(true, 'показана (result=true)', okOutcome);
+        else finish(false, 'мост ответил без result=true — награды нет', failOutcome);
       })
       .catch((e) => {
-        console.warn('[platform] rewarded недоступна/зависла — выдаём подсказку бесплатно:', e);
-        finish(true, 'ошибка/таймаут — выдано бесплатно',
+        console.warn('[platform] ' + adFormat + ' недоступна/зависла (adblock, нет объявлений) — награды нет:', e);
+        finish(false, 'ошибка/таймаут — награды нет',
           (e && e.message === 'timeout') ? 'timeout' : 'error');
       });
+  }
+
+  /* b26: onResume(outcome) — 'reward' | 'closed' | 'error' | 'timeout' |
+     'noads' | 'dev'. 'closed' = мост ответил без result:true (в Метрике с b25
+     так и ведётся — ряд цели не ломаем); награды нет в любом случае. */
+  function showRewarded(onRewarded, onPause, onResume) {
+    runBonusAd('reward', 'reward', 'closed', onRewarded, onPause, onResume);
+  }
+
+  /* b26: запасной путь «бонус за межстраничную» (в игре выключен — main.js
+     BONUS_AD_FORMAT). onResume(outcome) — 'shown' | 'not_shown' | 'error'
+     | 'timeout' | 'noads' | 'dev'. Отдельно от showInterstitial: тот
+     двигает кулдаун гейта и считает любой resolve показом (монетизация),
+     этот выдаёт бонус только при result === true. */
+  function showInterstitialBonus(onGranted, onPause, onResume) {
+    runBonusAd('interstitial', 'shown', 'not_shown', onGranted, onPause, onResume);
   }
 
   /* ---------- Единая точка времени (ЭТАП 3, п.1) ----------
@@ -514,7 +547,7 @@ window.Platform = (() => {
   return {
     init, gameReady, getLang, isAvailable, isRewardedAvailable,
     save, load,
-    showInterstitial, showRewarded, showBanner,
+    showInterstitial, showRewarded, showInterstitialBonus, showBanner,
     now, haptic,
     canPurchase, purchase,
     gameplayStart, gameplayStop,
