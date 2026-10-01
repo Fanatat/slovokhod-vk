@@ -59,11 +59,13 @@
                                  BONUS_AD_FORMAT). Награда ТОЛЬКО при result === true.
                                  onResume(outcome): 'shown' | 'not_shown' | 'error' |
                                  'timeout' | 'noads'
-     showBanner(onInset)        → VKWebAppShowBannerAd {banner_location:'bottom', layout_type:'resize'};
-                                  onInset(px) — сколько баннер перекрывает снизу (0 при resize).
+     showBanner(onInset)        → VKWebAppShowBannerAd {banner_location:'bottom'} (b54: только
+                                  телефон и только портрет; в альбоме VKWebAppHideBannerAd);
+                                  onInset(px) — сколько места под баннер оставить снизу (0, если
+                                  окно ужала сама площадка), вызывается при каждом изменении.
                                   ПК (vk_platform=desktop_*) — баннер не запрашивается.
                                  Гарантированная поверхность (задача Б) — не завязана на гейт
-                                 interstitial/rewarded, вызывается один раз при старте.
+                                 interstitial/rewarded, main.js зовёт один раз при старте.
      haptic(kind)              → 'select' → VKWebAppTapticSelectionChanged {};
                                  'light'/'medium' → VKWebAppTapticImpactOccurred {style};
                                  'success'/'error' → VKWebAppTapticNotificationOccurred {type}.
@@ -132,7 +134,7 @@ window.Platform = (() => {
 
   /* Query фрейма — снимок при загрузке адаптера (b25). analytics.js
      после Game Ready убирает из адреса параметры запуска ВК (sign, vk_*),
-     чтобы их не прочитал tag.js Метрики. getLang() и isDesktop() читают
+     чтобы их не прочитал tag.js Метрики. getLang() и isPhone() читают
      этот снимок, а не живой location.search, — от порядка вызовов
      относительно Analytics.start() они не зависят. */
   const LAUNCH_SEARCH = (() => {
@@ -505,22 +507,81 @@ window.Platform = (() => {
     return Date.now();
   }
 
-  /* ---------- Стики-баннер (задача Б) ----------
+  /* ---------- Стики-баннер (задача Б; b54 — переделан под телефон) ----------
      Гарантированная рекламная поверхность: не зависит от гейта
      interstitial/rewarded в main.js и не требует показа по клику.
-     layout_type:'resize' — клиент VK сам уменьшает область мини-аппа под
-     баннер, вручную резервировать место в CSS не нужно.
-     Params сверены по исходникам @vkontakte/vk-bridge
-     (packages/core/src/types/data.ts): ShowBannerAdRequest.
-     ПК-версия ВК (vk_platform=desktop_*) — БЕЗ баннера (решение основателя
-     25.09). Вертикальный справа ({layout_type:'overlay', banner_align:
-     'right', orientation:'vertical'}, по доке) живой ВК на ПК отклонял
-     (b26/b28, адблок выключен) — ветку убрали целиком. */
-  function isDesktop() {
+
+     b54 (замечание основателя 01.10: «баннер снизу на телефоне в вертикали
+     не сделан, как в game2/game3»). Что было в b52: params
+     {banner_location:'bottom', layout_type:'resize', height_type:'compact',
+     orientation:'vertical'} — по документации ВК («Баннерная реклама для
+     VK», таблица «Мобильное приложение») это смесь двух разных видов:
+     resize+vertical — колонка справа в АЛЬБОМНОЙ ориентации, compact — высота
+     ВЕРХНЕГО баннера. «Снизу по ширине экрана» на телефоне — ровно
+     {banner_location:'bottom'}, без остального (так в game2 и game3; в
+     game2 лишний resize на живом ВК баннер убирал совсем). Кроме того,
+     игра не знала, сколько места баннер занял: при ответе overlay он
+     перекрывал нижнюю кнопку.
+     Теперь (по образцу game3 — телефон/портрет/скрытие при повороте — и
+     game2 — запасная высота и повтор, отлаженные на живом ВК):
+       • только телефон (vk_platform: mobile_… и html5_…): ПК без баннера
+         (решение основателя 25.09 — не возвращать);
+       • только портрет: в альбоме баннер скрыт (VKWebAppHideBannerAd),
+         при возврате в портрет показан снова; поворот ловится по
+         orientationchange/resize;
+       • место под баннер резервирует ЛИБО площадка (после показа окно само
+         стало ниже ≥ 40 px — свой отступ не ставим, не двоим место), ЛИБО
+         игра: onInset(px) → main.js --banner-h (экраны кончаются выше
+         баннера, Board.fit). Высота — banner_height из ответа/событий
+         (VKWebAppCheckBannerAd, VKWebAppBannerAdUpdated), нет её — запас 90 px
+         (лучше лишний зазор, чем кнопка подсказки под баннером);
+       • игрок закрыл баннер крестиком (VKWebAppBannerAdClosedByUser) — до
+         следующего запуска не показываем, отступ снят;
+       • отказ/таймаут показа: повтор через 3 с, затем через 30 с, всего
+         3 попытки подряд (не шторм запросов); новая попытка — при повороте;
+       • ошибка/нет рекламы — баннера нет, игра как была.
+     Не проверялся в живом ВК (баннер приходит только внутри клиента). */
+  const BANNER_FALLBACK_HEIGHT_PX = 90;   // высота не пришла — запас (game2)
+  const BANNER_SELF_RESIZE_PX = 40;       // порог «площадка сама ужала окно» (game2)
+  const BANNER_SETTLE_MS = 2500;          // сколько после показа ждём, не ужмёт ли окно площадка
+  const BANNER_SHOW_TIMEOUT_MS = 20000;   // мост молчит на показ/скрытие
+  const BANNER_RETRY_MS = [3000, 30000];  // паузы перед повторами после отказа
+  let bannerInsetCb = null;
+  let bannerArmed = false;
+  let bannerOn = false;
+  let bannerBusy = false;
+  let bannerClosedByUser = false;
+  let platformResized = false;
+  let bannerInsetPx = 0;
+  let bannerFails = 0;
+  let bannerRetryTimer = null;
+  let bannerBaseHeight = 0;       // высота окна до показа
+  let bannerSettling = false;     // идёт окно наблюдения за ужатием
+  let bannerSettleTimer = null;
+
+  /* Телефон ВК: mobile_android/mobile_iphone/mobile_web (+ *_messenger) и
+     html5_android/html5_ios. ПК (desktop_*) и всё неизвестное — без баннера. */
+  function isPhone() {
     try {
       const p = new URLSearchParams(LAUNCH_SEARCH).get('vk_platform') || '';
-      return p.indexOf('desktop_') === 0;   // desktop_web, desktop_web_messenger, desktop_app_messenger
+      return /^(mobile|html5)/.test(p);
     } catch (_) { return false; }
+  }
+
+  function isPortrait() {
+    try {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        return !!window.matchMedia('(orientation: portrait)').matches;
+      }
+      if (typeof window !== 'undefined' && window.innerHeight && window.innerWidth) {
+        return window.innerHeight >= window.innerWidth;
+      }
+    } catch (_) {}
+    return true;   // не знаем — как портрет (тесты без окна)
+  }
+
+  function winHeight() {
+    try { return (typeof window !== 'undefined' && window.innerHeight) || 0; } catch (_) { return 0; }
   }
 
   function asText(v) {
@@ -531,31 +592,140 @@ window.Platform = (() => {
     return (v && v.message) ? String(v.message) : String(v);
   }
 
+  function setBannerInset(px) {
+    const next = Math.max(0, Math.round(Number(px)) || 0);
+    if (next === bannerInsetPx) return;
+    bannerInsetPx = next;
+    console.log('[platform] banner: полоса снизу ' + next + 'px');
+    if (bannerInsetCb) { try { bannerInsetCb(next); } catch (e) { console.warn('[platform] banner: onInset: ' + asText(e)); } }
+  }
+
+  /* Высота баннера из ответа показа / CheckBannerAd / BannerAdUpdated: схема
+     полей докой не подтверждена — читаем правдоподобные имена. */
+  function bannerHeightOf(info) {
+    if (!info || typeof info !== 'object') return 0;
+    const h = Number(info.banner_height != null ? info.banner_height
+      : info.height != null ? info.height
+      : (info.size && info.size.height));
+    return h > 0 ? h : 0;
+  }
+
+  function applyBannerInfo(info) {
+    if (platformResized) return;
+    if (info && info.result === false) { setBannerInset(0); return; }
+    setBannerInset(bannerHeightOf(info) || bannerInsetPx || BANNER_FALLBACK_HEIGHT_PX);
+  }
+
+  /* Площадка ужала окно под баннер сама (в портрете окно стало ниже ≥ 40 px)
+     — свой отступ не нужен, иначе место двоится. */
+  function checkSelfResize() {
+    if (!bannerOn || platformResized || !bannerBaseHeight || !isPortrait()) return;
+    if (bannerBaseHeight - winHeight() >= BANNER_SELF_RESIZE_PX) {
+      platformResized = true;
+      setBannerInset(0);
+      console.log('[platform] banner: площадка сама ужала окно (' + bannerBaseHeight + ' → ' +
+        winHeight() + 'px), свой отступ снят');
+    }
+  }
+
+  function stopSettle() {
+    bannerSettling = false;
+    bannerBaseHeight = 0;
+    if (bannerSettleTimer) { clearTimeout(bannerSettleTimer); bannerSettleTimer = null; }
+  }
+
+  function bannerFailed(why) {
+    console.warn('[platform] banner недоступен: ' + why);
+    if (bannerFails < BANNER_RETRY_MS.length) {
+      bannerRetryTimer = bgTimer(() => { bannerRetryTimer = null; syncBanner(); }, BANNER_RETRY_MS[bannerFails]);
+    }
+    bannerFails++;
+  }
+
+  /* Привести баннер к желаемому состоянию: показан ⇔ телефон+портрет+не
+     закрыт игроком. Один запрос за раз; по его окончании — сверка заново
+     (поворот мог случиться посреди запроса). */
+  function syncBanner() {
+    if (bannerBusy || bannerRetryTimer) return;
+    const want = !bannerClosedByUser && isPortrait();
+    if (want === bannerOn) return;
+    if (want && bannerFails > BANNER_RETRY_MS.length) return;   // попытки кончились — ждём поворота
+    bannerBusy = true;
+    if (want) {
+      const heightBefore = winHeight();
+      withTimeout(vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }), BANNER_SHOW_TIMEOUT_MS)
+        .then((info) => {
+          console.log('[platform] banner: ответ ' + asText(info));
+          if (info && info.result === false) { bannerFailed('result:false'); return; }
+          bannerOn = true;
+          bannerFails = 0;
+          applyBannerInfo(info);
+          // Уточнение высоты (fire-and-forget): ответ показа её может не нести.
+          Promise.resolve(vkBridge.send('VKWebAppCheckBannerAd')).then((r) => {
+            if (bannerOn && bannerHeightOf(r)) applyBannerInfo(r);
+          }, () => {});
+          bannerBaseHeight = heightBefore;
+          bannerSettling = true;
+          bannerSettleTimer = bgTimer(() => { bannerSettleTimer = null; checkSelfResize(); bannerSettling = false; }, BANNER_SETTLE_MS);
+        })
+        .catch((e) => { bannerFailed(asText(e)); })
+        .then(() => { bannerBusy = false; syncBanner(); });
+    } else {
+      withTimeout(vkBridge.send('VKWebAppHideBannerAd', {}), BANNER_SHOW_TIMEOUT_MS)
+        .catch((e) => { console.warn('[platform] banner: скрыть не удалось: ' + asText(e)); })
+        .then(() => {
+          bannerOn = false;
+          platformResized = false;
+          stopSettle();
+          setBannerInset(0);
+          bannerBusy = false;
+          syncBanner();
+        });
+    }
+  }
+
+  function onBannerEvent(e) {
+    const type = e && e.detail && e.detail.type;
+    if (type === 'VKWebAppBannerAdUpdated') {
+      if (bannerOn) applyBannerInfo(e.detail.data);
+    } else if (type === 'VKWebAppBannerAdClosedByUser') {
+      bannerClosedByUser = true;
+      bannerOn = false;
+      platformResized = false;
+      stopSettle();
+      setBannerInset(0);
+    }
+  }
+
+  function onResize() {
+    if (bannerSettling) checkSelfResize();
+    syncBanner();
+  }
+
+  function onRotate() {
+    if (bannerRetryTimer) { clearTimeout(bannerRetryTimer); bannerRetryTimer = null; }
+    bannerFails = 0;
+    syncBanner();
+  }
+
   function showBanner(onInset) {
     if (!ready) {
       console.warn('[platform] dev: banner пропущен');
       return;
     }
-    if (isDesktop()) {
-      console.log('[platform] banner: ПК-версия — без баннера');
+    if (!isPhone()) {
+      console.log('[platform] banner: не телефон ВК — без баннера');
       return;
     }
-    // b23 (решение основателя 13.09): баннер СНИЗУ на постоянной основе.
-    // layout_type:'resize' — клиент сам ужимает окно; если клиент ответил
-    // 'overlay', сообщаем main.js высоту баннера, чтобы экран отступил.
-    vkBridge.send('VKWebAppShowBannerAd', {
-      banner_location: 'bottom',
-      layout_type: 'resize',
-      height_type: 'compact',
-      orientation: 'vertical',
-    }).then((r) => {
-      const overlay = !!(r && r.layout_type === 'overlay');
-      const h = (overlay && typeof r.banner_height === 'number') ? r.banner_height : 0;
-      console.log('[platform] banner: ' + asText(r) + ' → полоса снизу ' + h + 'px');
-      if (typeof onInset === 'function') onInset(h);
-    }).catch((e) => {
-      console.warn('[platform] banner недоступен: ' + asText(e));
-    });
+    if (typeof onInset === 'function') bannerInsetCb = onInset;
+    if (bannerArmed) { syncBanner(); return; }   // повторный вызов — только сверка
+    bannerArmed = true;
+    if (typeof vkBridge.subscribe === 'function') vkBridge.subscribe(onBannerEvent);
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('orientationchange', onRotate);
+      window.addEventListener('resize', onResize);
+    }
+    syncBanner();
   }
 
   /* ---------- Тактильный отклик (b24) ----------
