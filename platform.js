@@ -337,10 +337,23 @@ window.Platform = (() => {
       }
       if (!res) res = await vkBridge.send('VKWebAppStorageGet', { keys: [STORAGE_KEY] });
       const raw = res.keys && res.keys[0] && res.keys[0].value;
-      return raw ? JSON.parse(raw) : null;
+      if (!raw) return null;   // чтение удалось, сейва нет — новый игрок
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        // Испорченная строка читается повторно с тем же итогом: вечная блокировка
+        // записи хуже, чем начать профиль заново. Громко, не молча.
+        console.error('[platform] сейв повреждён (JSON), игра стартует с чистого профиля:', e);
+        return null;
+      }
     } catch (e) {
+      // b55 (аудит G1-02): сбой ЧТЕНИЯ — не «сейва нет». null принимали за
+      // нового игрока и писали пустой профиль поверх облачного. Теперь
+      // load() отклоняется, main.js не пишет, пока чтение не удастся.
       console.error('[platform] StorageGet ошибка:', e);
-      return null;
+      const err = new Error('save read failed');
+      err.loadFailed = true;
+      throw err;
     }
   }
 

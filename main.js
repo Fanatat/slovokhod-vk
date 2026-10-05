@@ -104,7 +104,19 @@
   // first_move ждёт здесь и уходит сразу после game_loaded; sec — как в
   // момент хода. level_start ждать не нужно: new_player в нём нет.
   var saveLoaded = false;
+  // b55 (аудит G1-01/G1-02): профиль прочитан успешно (данные или честное «сейва
+  // нет»). До этого persist() молчит, а вход на уровень закрыт: иначе нулевое
+  // начальное состояние уходило в облако поверх сейва, который ещё грузится или
+  // не прочитался.
+  var profileReady = false;
+  var profileRetryTimer = null;
+  var profileLoadFailed = false;
+  var PROFILE_RETRY_MS = [2000, 5000, 10000, 20000];   // дальше — каждые 20 с
   var pendingFirstMove = null;
+  // b55 (аудит G1-05/G1-06): номер попытки. Растёт при каждом входе на уровень и
+  // при уходе в меню; отложенные эффекты (экран победы, награда за рекламу)
+  // запоминают его и не трогают чужую попытку.
+  var attemptId = 0;
   var levelActive = false;     // уровень открыт и не выигран — уход с него = level_quit
   var levelMoves = 0;
   var levelUndos = 0;
@@ -469,6 +481,10 @@
   var lastSavedJson = null;
 
   function persist(fullState) {
+    if (!profileReady) {
+      console.warn('[save] профиль ещё не прочитан — запись пропущена, чтобы не затереть облачный сейв');
+      return;
+    }
     /* ЭТАП 3, п.3 (миграция): поля модуля удержания дописываются ЗДЕСЬ,
        в единственной точке записи. Любой существующий вызов persist()
        (их шесть) иначе записал бы объект БЕЗ них — и молча стёр бы
@@ -1053,6 +1069,10 @@
   }
 
   function requestOpenLevel(index) {
+    if (!profileReady) {   // b55: профиль грузится или не прочитался — на уровень рано
+      showRetentionToast(I18N.t(profileLoadFailed ? 'profileFail' : 'profileWait'), 3200);
+      return;
+    }
     if (canOpenLevel(index)) { openLevel(index); return; }
     pendingOpenIndex = index;
     console.log('[retention] стена: запас 0, уровень ' + (index + 1) +
@@ -1547,6 +1567,7 @@
     if (!level) return;
     var isLast = !Levels.get(index + 1);
     currentIndex = index;
+    attemptId++;
     // b25: каждый вход на уровень (и рестарт, и повтор пройденного).
     levelActive = true;
     levelMoves = 0;
@@ -1687,10 +1708,19 @@
            уже пройденном. Для сетки уровней разницы нет: она сравнивает
            i > maxUnlocked, и значение count лишь означает «открыто всё». */
         maxUnlocked = Math.max(maxUnlocked, currentIndex + 1);
-        persist({ level: currentIndex, max: maxUnlocked, records: records });
+        // b55 (аудит G1-07): точка «Продолжить» — следующий уровень, а не только что
+        // пройденный (на L1 вообще давало level:0 и кнопка пропадала).
+        var resumeIndex = isLast ? currentIndex : currentIndex + 1;
+        persist({ level: resumeIndex, max: maxUnlocked, records: records });
+        savedIndex = resumeIndex;
+        if (resumeIndex > 0) setMenuProgress(true);
         Sound.win();
         // Небольшая пауза, чтобы игрок увидел последнее слово, потом оверлей.
+        // b55 (G1-06): если за паузу игрок перезапустил уровень или ушёл в меню,
+        // оверлей победы над чужой попыткой не показываем.
+        var winAttempt = attemptId;
         setTimeout(function () {
+          if (winAttempt !== attemptId) return;
           if (elWinTitle) elWinTitle.textContent = isLast ? I18N.t('allDone') : I18N.t(starsNow === 3 ? 'levelPerfect' : 'levelDone');
           btnNext.textContent = isLast ? I18N.t('toMenu') : I18N.t('next');
           countUp(elWinScore, I18N.t('score') + ': ', finalScore);
@@ -1720,6 +1750,14 @@
           console.log('[ftue] ' + WRONG_STREAK_NUDGE + ' промаха подряд — пульс первой буквы «' + hintWord + '»');
           Board.nudgeCurrent(hintWord);
         }
+      },
+      // b55 (G1-03): слово верное, но выложено другим путём, чем напечатано в уровне.
+      onAltPath: function (word) {
+        countMove();
+        snd('order');
+        feel('light');
+        Board.nudgeCurrent(word);
+        showRetentionToast(I18N.fill('altPath', { word: word }), 3600);
       },
       onOutOfOrder: function () {
         countMove();   // b25
@@ -1888,7 +1926,15 @@
       } catch (e) { /* аналитика не роняет игру */ }
 
       // Прогресс грузим параллельно, чтобы не задерживать Game Ready.
-      Platform.load().then(function (data) {
+      loadProfile(loadMs, 0);
+    });
+  }
+
+  /* b55 (аудит G1-02): отказ чтения (loadFailed) — не «сейва нет». Профиль
+     остаётся закрытым для записи, чтение повторяется; новый игрок — только
+     при успешном ответе без данных. */
+  function loadProfile(loadMs, attempt) {
+    Platform.load().then(function (data) {
         if (data && typeof data.level === 'number' && data.level > 0 && Levels.get(data.level)) {
           savedIndex = data.level;
         }
@@ -1912,6 +1958,8 @@
         launchNewPlayer = !data || (typeof data === 'object' && Object.keys(data).length === 0);
         track('game_loaded', { load_ms: loadMs, new_player: launchNewPlayer });   // b25
         saveLoaded = true;
+        profileReady = true;
+        profileLoadFailed = false;
         if (pendingFirstMove) {   // первый ход был раньше сейва — new_player теперь известен
           pendingFirstMove.new_player = launchNewPlayer;
           track('first_move', pendingFirstMove);
@@ -1921,7 +1969,16 @@
         // Модуль удержания поднимаем ПОСЛЕ прогресса: миграция читает
         // maxUnlocked, а строки видимого слоя — уже готовые рекорды.
         bootRetention(data);
-      });
+    }, function (err) {
+      profileLoadFailed = true;
+      var wait = PROFILE_RETRY_MS[Math.min(attempt, PROFILE_RETRY_MS.length - 1)];
+      console.error('[save] чтение профиля не удалось (попытка ' + (attempt + 1) + '), ' +
+        'запись закрыта, повтор через ' + wait + ' мс', err);
+      if (attempt === 0) showRetentionToast(I18N.t('profileFail'), 5200);
+      profileRetryTimer = setTimeout(function () {
+        profileRetryTimer = null;
+        loadProfile(loadMs, attempt + 1);
+      }, wait);
     });
   }
 
@@ -1949,6 +2006,7 @@
       levelActive = false;
       track('level_quit', { level: currentIndex + 1, sec: lvClockSec() });
     }
+    attemptId++;   // b55: отложенные эффекты ушедшей попытки (оверлей победы, награда) погасли
     lvClockSet('on', false);
     clearIdle();
     Board.clear();
@@ -2060,6 +2118,14 @@
   // b26: рекламы нет (adblock/нет филла/ошибка) → подсказки нет + уведомление.
   btnHint.addEventListener('click', function () {
     Sound.resumeContext();
+    /* b55 (аудит G1-04): подсказка тратится и портит счёт ТОЛЬКО если есть что
+       открывать. Раньше ресурс списывался до проверки, и на полностью
+       раскрытом слове нажатие (или просмотр рекламы) пропадало впустую. */
+    if (!(hintWord && Board.canReveal(hintWord))) {
+      console.log('[hint] у слова «' + hintWord + '» все буквы уже открыты — ничего не списано');
+      showRetentionToast(I18N.t('hintNothing'), 2400);
+      return;
+    }
     /* b19: золотая подсказка (день 7 календаря) — открывает целевое
        слово целиком. Тратится раньше обычных бесплатных: кнопка это
        обещала подписью (updateHintLabel). Для счёта уровня — одна
@@ -2095,14 +2161,28 @@
     // b25: через showBonusAd — цели rewarded_* и защита от двойного клика.
     // b27 (раунд 2, 01.10): за ОДИН просмотр — AD_HINTS_REWARD подсказок: одна
     // открывается сразу, остальные падают в баланс bonusHints (тратятся без рекламы).
-    showBonusAd('hint', function () {   // onRewarded — chain[chainPos]
-      bonusHints += AD_HINTS_REWARD - 1;
-      hintsUsed++;
+    // b55 (G1-05): контекст клика запоминаем. Награда за ролик может прийти поздно
+    // (сторож b53 это допускает) — к тому времени игрок мог уйти в меню или открыть
+    // другой уровень. Тогда все AD_HINTS_REWARD единиц идут в баланс, а раскрытие
+    // и штраф к счёту — только если попытка и слово те же.
+    var clickAttempt = attemptId;
+    var clickWord = hintWord;
+    showBonusAd('hint', function () {   // onRewarded
+      var sameContext = levelActive && clickAttempt === attemptId && clickWord === hintWord;
+      var shown = false;
+      if (sameContext) {
+        bonusHints += AD_HINTS_REWARD - 1;
+        shown = Board.revealHint(hintWord);
+        if (shown) hintsUsed++; else bonusHints += 1;   // раскрывать уже нечего — единица не пропадает
+      } else {
+        bonusHints += AD_HINTS_REWARD;
+        console.log('[ad] награда за подсказку пришла в другом контексте — ' + AD_HINTS_REWARD +
+          ' подсказок в баланс, раскрытия и штрафа нет');
+      }
       persistProgress();
       renderHintBadge();
       updateHintLabel();
-      Board.revealHint(hintWord);
-      snd('hint');
+      if (shown) snd('hint');
       showRetentionToast(I18N.fill('dailyHints', { n: AD_HINTS_REWARD, hint: I18N.plural(AD_HINTS_REWARD, HINT_FORMS) }), 2600);
     });
   });

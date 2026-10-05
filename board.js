@@ -30,7 +30,7 @@ window.Board = (function () {
     boardEl.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointercancel', onCancel);   // b55 (G1-08): отмена жеста — не отпускание
   }
 
   function render(level, h) {
@@ -128,6 +128,7 @@ window.Board = (function () {
 
   function onDown(e) {
     if (!current) return;
+    if (dragging && e.isPrimary === false) return;   // b55: второй палец не сбивает идущий жест
     var cell = cellFromTarget(e.target) || cellFromPoint(e.clientX, e.clientY);
     if (!cell) return;
     e.preventDefault();
@@ -141,12 +142,23 @@ window.Board = (function () {
   }
   function onMove(e) {
     if (!dragging) return;
+    if (e.isPrimary === false) return;   // b55: двигает только основной указатель
     e.preventDefault();
     var cell = cellFromPoint(e.clientX, e.clientY);
     if (cell) tryExtend(cell);
   }
-  function onUp() {
+  // b55 (аудит G1-08): системная отмена жеста (звонок, свайп-жест ОС, потеря
+  // касания) раньше шла в onUp и могла ПРИНЯТЬ слово или дать красную вспышку.
+  // Теперь путь просто гасится: ни проверки, ни штрафа.
+  function onCancel() {
     if (!dragging) return;
+    dragging = false;
+    removeActive(path.map(function (p) { return p.el; }));
+    path = [];
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    if (e && e.isPrimary === false) return;   // b55: отпускание второго пальца жест не завершает
     dragging = false;
     var cells = path.map(function (p) { return p.el; });
     var matched = evaluate();
@@ -255,15 +267,36 @@ window.Board = (function () {
         return w.word;
       }
     }
+    /* b55 (аудит G1-03): путь не совпал с записанным ни у одного слова, но
+       буквы могут читаться как ещё не найденное слово — на 67 уровнях это
+       другая верная трассировка (L1: «МАСЛО» уходит в (0,0)…(1,1) вместо
+       (2,0)). Принять её нельзя — она заберёт клетки других слов цепочки и
+       поле не закроется. Поэтому это не «ошибка»: без красной вспышки и без
+       счёта промахов, с мягким объяснением. */
+    var letters = path.map(function (p) { return p.el.textContent; }).join('');
+    var lettersRev = letters.split('').reverse().join('');
+    for (var a = 0; a < current.words.length; a++) {
+      var aw = current.words[a];
+      if (found[aw.word]) continue;
+      if (aw.word === letters || aw.word === lettersRev) {
+        if (handlers.isAccepted && !handlers.isAccepted(aw.word)) {
+          if (handlers.onOutOfOrder) handlers.onOutOfOrder(aw.word);
+        } else if (handlers.onAltPath) {
+          handlers.onAltPath(aw.word);
+        } else {
+          return null;
+        }
+        return false;
+      }
+    }
     return null;
   }
 
-  // Подсказка: подсветить первую ЕЩЁ НЕ подсвеченную букву.
-  // targetWord (опц.) — целиться строго в это слово (текущее звено цепочки).
-  // Без аргумента — старое поведение (любое ненайденное слово).
-  // Повторные вызовы открывают следующие буквы. false — если открывать нечего.
-  function revealHint(targetWord) {
-    if (!current) return false;
+  // b55 (аудит G1-04): первая ещё не подсвеченная клетка целевого слова.
+  // Общая для canReveal и revealHint — «есть что открывать» и «открыть»
+  // не расходятся.
+  function nextHintCell(targetWord) {
+    if (!current) return null;
     var startIdx = 0, endIdx = current.words.length;
     if (targetWord) {
       // Ищем индекс целевого слова — только его буквы будем открывать.
@@ -277,13 +310,26 @@ window.Board = (function () {
       for (var j = 0; j < w.path.length; j++) {
         var rc = w.path[j];
         var el = boardEl.querySelector('.cell[data-r="' + rc[0] + '"][data-c="' + rc[1] + '"]');
-        if (el && !el.classList.contains('hint')) {
-          el.classList.add('hint');
-          return true;
-        }
+        if (el && !el.classList.contains('hint')) return el;
       }
     }
-    return false;
+    return null;
+  }
+
+  // Есть ли у целевого слова хотя бы одна неоткрытая буква (ничего не меняет).
+  function canReveal(targetWord) {
+    return !!nextHintCell(targetWord);
+  }
+
+  // Подсказка: подсветить первую ЕЩЁ НЕ подсвеченную букву.
+  // targetWord (опц.) — целиться строго в это слово (текущее звено цепочки).
+  // Без аргумента — старое поведение (любое ненайденное слово).
+  // Повторные вызовы открывают следующие буквы. false — если открывать нечего.
+  function revealHint(targetWord) {
+    var el = nextHintCell(targetWord);
+    if (!el) return false;
+    el.classList.add('hint');
+    return true;
   }
 
   // Мягкая подсказка: подсветить первую клетку нужного слова (~1.2с).
@@ -406,6 +452,6 @@ window.Board = (function () {
   }
 
   // fit — наружу: main.js пересчитывает поле, когда меняется полоса под баннер (b23).
-  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, nudgeCurrent: nudgeCurrent, fit: fit,
+  return { init: init, render: render, clear: clear, revealHint: revealHint, revealWord: revealWord, canReveal: canReveal, nudgeCurrent: nudgeCurrent, fit: fit,
            demoPath: demoPath, stopDemo: stopDemo };
 })();
