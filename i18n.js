@@ -27,6 +27,9 @@ gameTitle: 'Словоход',
       profileFail: 'Не удалось загрузить прогресс. Он не потерян — пробуем снова, подождите немного',
       adFailHint: 'Реклама не показалась — подсказка не выдана. Отключите блокировщик рекламы и нажмите ещё раз',
       adFailEnergy: 'Реклама не показалась — запас не добавлен. Отключите блокировщик рекламы и попробуйте ещё раз',
+      // b56: приложение ВК — блокировщика там нет, совет про него вводил в заблуждение
+      adFailAppHint: 'Реклама не показалась — подсказка не выдана. Попробуйте ещё раз чуть позже',
+      adFailAppEnergy: 'Реклама не показалась — запас не добавлен. Попробуйте ещё раз чуть позже',
       // b53: кнопка за рекламой, пока ролик грузится (на телефоне до нескольких секунд)
       adLoading: 'Загружаем рекламу…',
       // b53: страница открыта не во ВКонтакте (стенд в браузере) — рекламы здесь нет совсем
@@ -117,6 +120,8 @@ gameTitle: 'Словоход',
       profileFail: 'Could not load your progress. It is not lost — retrying, please wait',
       adFailHint: 'The ad did not play — no hint given. Turn off your ad blocker and tap again',
       adFailEnergy: 'The ad did not play — no energy added. Turn off your ad blocker and try again',
+      adFailAppHint: 'The ad did not play — no hint given. Please try again a bit later',
+      adFailAppEnergy: 'The ad did not play — no energy added. Please try again a bit later',
       adLoading: 'Loading ad…',
       adNoSdkHint: 'Ads are only available when the game runs on VK — no hint given',
       adNoSdkEnergy: 'Ads are only available when the game runs on VK — no energy added',

@@ -19,11 +19,11 @@
        бы полусобранную версию (шрам ТЗ №19 Color Sort).
        Вне билда плейсхолдер остаётся как есть — это нормально, значит
        билд не собирался через build.py. -->
-  <link rel="stylesheet" href="style.css?v=55" />
+  <link rel="stylesheet" href="style.css?v=56" />
   <!-- b25: манифест звуков (sound.js читает адрес отсюда). ?v= штампует
        build.py, как у скриптов, — sound.js дописывает ту же версию к
        каждому звуковому файлу, чтобы после обновления не играл старый. -->
-  <meta name="sfx-manifest" content="assets/audio/manifest.json?v=55" />
+  <meta name="sfx-manifest" content="assets/audio/manifest.json?v=56" />
 
   <!-- Тег SDK площадки — build.py подставляет его сюда по платформе.
        Вне билда (локальная разработка) маркер НЕ заменяется:
@@ -34,7 +34,7 @@
   <!-- Номер билда (стандарт с 2026-07-25) — build.py подставляет сюда
        window.BUILD = 'vk-bN-<git-хэш>-<дата>'. Вне билда маркер НЕ
        заменяется: main.js покажет плашку "dev" вместо номера. -->
-  <script>window.BUILD = 'vk-b55-eadc36d-20261005';</script>
+  <script>window.BUILD = 'vk-b56-d3aad99-20261005';</script>
 </head>
 <body>
   <div id="app">
@@ -217,14 +217,14 @@
        текст подставляет main.js из window.BUILD (см. маркер BUILD_INFO выше). -->
   <div id="build-badge" aria-hidden="true"></div>
 
-  <script src="i18n.js?v=55"></script>
-  <script src="platform.js?v=55"></script>
-  <script src="levels.js?v=55"></script>
-  <script src="board.js?v=55"></script>
-  <script src="sound.js?v=55"></script>
-  <script src="fx.js?v=55"></script>
-  <script src="retention.js?v=55"></script>
-  <script src="analytics.js?v=55"></script>
-  <script src="main.js?v=55"></script>
+  <script src="i18n.js?v=56"></script>
+  <script src="platform.js?v=56"></script>
+  <script src="levels.js?v=56"></script>
+  <script src="board.js?v=56"></script>
+  <script src="sound.js?v=56"></script>
+  <script src="fx.js?v=56"></script>
+  <script src="retention.js?v=56"></script>
+  <script src="analytics.js?v=56"></script>
+  <script src="main.js?v=56"></script>
 </body>
 </html>

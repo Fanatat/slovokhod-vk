@@ -239,32 +239,42 @@
     var resulted = false;   // rewarded_result отправлен — ровно один на клик
     var granted = false;
     var lateTimer = null;
-    function report(result) {
+    // b56: err — ключ ответа ВК у неудачного показа ('error:client_error:1',
+    // 'timeout', 'no_result'); у 'reward' параметра нет.
+    function report(result, err) {
       if (resulted) return;
       resulted = true;
       if (lateTimer) { clearTimeout(lateTimer); lateTimer = null; }
-      track('rewarded_result', { place: place, result: result });
+      var p = { place: place, result: result };
+      if (err && result !== 'reward') p.err = err;
+      track('rewarded_result', p);
     }
-    function finish(outcome) {
+    function finish(outcome, diag) {
       if (settled) return;
       settled = true;
       setBonusAdBusy(place, false);
       var good = (outcome === 'reward' || outcome === 'shown');
+      var err = diag && diag.key;
       if (outcome === 'timeout' && !granted) {
         // b53: сторож снял паузу, но ролик мог ещё идти — итог скажет его подтверждение.
-        lateTimer = setTimeout(function () { report('error'); }, AD_LATE_GRACE_MS);
+        lateTimer = setTimeout(function () { report('error', err); }, AD_LATE_GRACE_MS);
       } else {
-        report(good ? 'reward' : (outcome === 'closed' ? 'closed' : 'error'));
+        report(good ? 'reward' : (outcome === 'closed' ? 'closed' : 'error'), err);
       }
       // Любой исход без показа (adblock, нет объявлений, пауза между показами,
       // таймаут, закрыт до конца, нет SDK) — бонуса нет, и игрок должен понять
       // почему. Исключение — только dev-выдача на localhost. Если ролик всё
       // же досмотрят после сторожа, тост награды заменит это уведомление.
+      // b56: в приложении ВК блокировщика не бывает — там текст без него;
+      // под текстом — код ответа ВК (diag.text), чтобы причину было видно
+      // с телефона без консоли.
       if (!good && outcome !== 'dev') {
         var key = outcome === 'noads'
           ? (place === 'hint' ? 'adNoSdkHint' : 'adNoSdkEnergy')
-          : (place === 'hint' ? 'adFailHint' : 'adFailEnergy');
-        showRetentionToast(I18N.t(key), 5200);
+          : (diag && diag.app)
+            ? (place === 'hint' ? 'adFailAppHint' : 'adFailAppEnergy')
+            : (place === 'hint' ? 'adFailHint' : 'adFailEnergy');
+        showRetentionToast(I18N.t(key), diag ? 9000 : 5200, diag && diag.text);
       }
     }
     function onGranted() {                   // награда строго один раз
@@ -277,7 +287,7 @@
       whenVisible(onReward);
     }
     function onPause() { Sound.suspend(); lvClockSet('ad', true); }
-    function onResume(outcome) { Sound.resume(); lvClockSet('ad', false); finish(outcome); }
+    function onResume(outcome, diag) { Sound.resume(); lvClockSet('ad', false); finish(outcome, diag); }
     try {
       if (BONUS_AD_FORMAT === 'interstitial' && typeof Platform.showInterstitialBonus === 'function') {
         Platform.showInterstitialBonus(onGranted, onPause, onResume);
@@ -954,9 +964,21 @@
   }
 
   var toastTimer = null;
-  function showRetentionToast(text, ms) {
+  /* b56: sub — вторая мелкая строка (код ответа ВК при неудачном показе). */
+  function showRetentionToast(text, ms, sub) {
     if (!retentionToast) return;
     retentionToast.textContent = text;
+    if (sub) {
+      if (typeof document !== 'undefined' && typeof document.createElement === 'function' &&
+          typeof retentionToast.appendChild === 'function') {
+        var code = document.createElement('span');
+        code.className = 'toast-code';
+        code.textContent = sub;
+        retentionToast.appendChild(code);
+      } else {
+        retentionToast.textContent = text + ' (' + sub + ')';
+      }
+    }
     retentionToast.hidden = false;
     // Перезапуск анимации: класс снимается и ставится в следующем кадре.
     retentionToast.classList.remove('is-visible');

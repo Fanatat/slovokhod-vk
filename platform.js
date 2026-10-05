@@ -182,6 +182,7 @@ window.Platform = (() => {
       // b53: предзагрузка рекламы — в фоне, init её НЕ ждёт (урок b26).
       preloadAds('reward');
       preloadAds('interstitial');
+      fetchClientVersion();   // b56: версия приложения ВК — в диагностику показа
 
       return true;
     } catch (e) {
@@ -227,38 +228,141 @@ window.Platform = (() => {
      формата. Ничего не ждёт, ни на что не влияет (isRewardedAvailable
      по-прежнему true, награда — только по result === true при показе).
      Ответ «материалов нет»/ошибка/молчание — повтор через
-     PRELOAD_RETRY_MS, не больше PRELOAD_RETRIES раз подряд. */
+     PRELOAD_RETRY_MS, не больше PRELOAD_RETRIES раз подряд.
+
+     b56 (жалоба 05.10: на телефоне реклама за подсказку не показывается):
+     проверки идут СТРОГО ПО ОДНОЙ и не во время показа. До b56 reward и
+     interstitial уходили одновременно, а после показа проверка шла, пока
+     мог висеть повтор. У Android-клиента ВК известна потеря ответов на
+     одинаковые параллельные запросы (VKCOM/vk-bridge#615, открыт 07.04.2026)
+     и «повторный CheckNativeAds так и висит» (#201). Молчание моста —
+     следующая проверка не раньше PRELOAD_RETRY_MS, чтобы не множить
+     зависшие запросы. */
   const PRELOAD_TIMEOUT_MS = 8000;
   const PRELOAD_RETRY_MS = 30000;
   const PRELOAD_RETRIES = 5;
-  const preloadState = {};   // формат → { busy, tries, timer }
+  const preloadState = {};   // формат → { queued, tries, timer, last }
+  const checkQueue = [];     // b56: форматы в очереди на CheckNativeAds
+  let checkBusy = false;     // b56: CheckNativeAds в полёте
+  let checkHold = null;      // b56: пауза очереди после молчания моста
+  let showsInFlight = 0;     // b56: ShowNativeAds в полёте — проверки ждут
   function preloadAds(fmt) {
     if (!ready || !hasBridge()) return;
-    const s = preloadState[fmt] || (preloadState[fmt] = { busy: false, tries: 0, timer: null });
-    if (s.busy) return;
+    const s = preloadState[fmt] || (preloadState[fmt] = { queued: false, tries: 0, timer: null, last: '' });
     if (s.timer) { clearTimeout(s.timer); s.timer = null; }
-    s.busy = true;
+    if (s.queued) return;
+    s.queued = true;
+    checkQueue.push(fmt);
+    pumpChecks();
+  }
+  function pumpChecks() {
+    if (checkBusy || checkHold || showsInFlight > 0 || !checkQueue.length) return;
+    const fmt = checkQueue.shift();
+    const s = preloadState[fmt];
+    s.queued = false;
+    checkBusy = true;
     let done = false;
-    const end = (okNow, why) => {
+    const end = (okNow, why, last) => {
       if (done) return;
       done = true;
       clearTimeout(guard);
-      s.busy = false;
-      if (okNow) { s.tries = 0; return; }
-      if (s.tries >= PRELOAD_RETRIES) {
+      checkBusy = false;
+      s.last = last;   // b56: для диагностики показа (adDiag)
+      if (okNow) {
+        s.tries = 0;
+      } else if (s.tries >= PRELOAD_RETRIES) {
         console.warn('[platform] предзагрузка ' + fmt + ': ' + why + ' — повторы исчерпаны, ролик загрузится при показе');
-        return;
+      } else {
+        s.tries++;
+        s.timer = bgTimer(() => { s.timer = null; preloadAds(fmt); }, PRELOAD_RETRY_MS);
       }
-      s.tries++;
-      s.timer = bgTimer(() => { s.timer = null; preloadAds(fmt); }, PRELOAD_RETRY_MS);
+      if (last === 'silent') {
+        checkHold = bgTimer(() => { checkHold = null; pumpChecks(); }, PRELOAD_RETRY_MS);
+      } else {
+        pumpChecks();
+      }
     };
-    const guard = bgTimer(() => end(false, 'мост молчит'), PRELOAD_TIMEOUT_MS);
+    const guard = bgTimer(() => end(false, 'мост молчит', 'silent'), PRELOAD_TIMEOUT_MS);
     let p;
     try { p = vkBridge.send('VKWebAppCheckNativeAds', { ad_format: fmt }); } catch (e) { p = Promise.reject(e); }
     Promise.resolve(p).then(
-      (res) => end(!!(res && res.result === true), 'материалов пока нет'),
-      () => end(false, 'ошибка'),
+      (res) => { const ok = !!(res && res.result === true); end(ok, 'материалов пока нет', ok ? 'ok' : 'empty'); },
+      (e) => { console.warn('[platform] предзагрузка ' + fmt + ' — ошибка моста:', e); end(false, 'ошибка', 'err' + bridgeErr(e).short); },
     );
+  }
+  /* b56: показ занимает канал — проверки ждут ответа моста о показе.
+     Сторож показа (AD_HANG_TIMEOUT_MS) канал НЕ освобождает: на телефоне
+     ролик с финальным экраном идёт дольше 40 с (b53), и проверка ушла бы
+     поверх идущего показа. Мост не ответил совсем — канал освободится
+     через SHOW_HOLD_MAX_MS. Возвращает release(): ровно один раз. */
+  const SHOW_HOLD_MAX_MS = 120000;
+  function holdChecksForShow() {
+    showsInFlight++;
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      clearTimeout(fallback);
+      showsInFlight--;
+      pumpChecks();
+    };
+    const fallback = bgTimer(release, SHOW_HOLD_MAX_MS);
+    return release;
+  }
+
+  /* ---------- Диагностика показа рекламы (b56) ----------
+     Жалоба основателя 05.10: в мобильном приложении ВК реклама за
+     подсказку «грузится, потом — отключите блокировщик», хотя
+     блокировщика нет. Игроку и в Метрику уходило только слово 'error' —
+     настоящий ответ моста (error_type / error_code / error_reason) видела
+     лишь консоль, а на телефоне её не открыть. Теперь каждый неудачный
+     показ несёт diag: что именно ответил мост, через сколько, была ли
+     предзагрузка и какая версия приложения ВК. main.js выводит короткую
+     строку кода в уведомлении и шлёт ключ в rewarded_result.err. */
+  let clientVer = '';   // 'android 8.12' — VKWebAppGetClientVersion, фоном после init
+  function fetchClientVersion() {
+    let p;
+    try { p = vkBridge.send('VKWebAppGetClientVersion'); } catch (_) { return; }
+    Promise.resolve(p).then((r) => {
+      if (r && (r.platform || r.version)) clientVer = String(r.platform || '?') + ' ' + String(r.version || '?');
+    }, () => {});
+  }
+  function launchPlatform() {
+    try { return new URLSearchParams(LAUNCH_SEARCH).get('vk_platform') || ''; } catch (_) { return ''; }
+  }
+  /* Отказ моста ВК: { error_type, error_data: { error_code, error_reason } };
+     error_reason бывает строкой или объектом { error_msg }. */
+  function bridgeErr(e) {
+    let type = '', code = '', reason = '';
+    if (e && typeof e === 'object') {
+      if (e instanceof Error) reason = e.message;
+      type = e.error_type ? String(e.error_type) : '';
+      const d = (e.error_data && typeof e.error_data === 'object') ? e.error_data : e;
+      if (d.error_code != null) code = String(d.error_code);
+      let r = d.error_reason != null ? d.error_reason : (d.error_description || d.error_msg || '');
+      if (r && typeof r === 'object') r = r.error_msg || r.error_description || JSON.stringify(r);
+      if (r) reason = String(r);
+    } else if (e != null) {
+      reason = String(e);
+    }
+    reason = reason.replace(/\s+/g, ' ').trim().slice(0, 48);
+    const short = (type ? ':' + type : '') + (code ? ':' + code : '');
+    return { type, code, reason, short };
+  }
+  function adDiag(fmt, startedAt, res, err) {
+    const sec = Math.round((Date.now() - startedAt) / 100) / 10;
+    const pre = (preloadState[fmt] && preloadState[fmt].last) || 'none';
+    const be = res === 'error' ? bridgeErr(err) : { type: '', code: '', reason: '', short: '' };
+    // key — для Метрики: короткий и стабильный ('error:client_error:1', 'timeout', 'no_result')
+    const key = res === 'error' ? 'error' + be.short : res;
+    const what = res === 'error'
+      ? ['ВК', be.type, be.code, be.reason ? '«' + be.reason + '»' : ''].filter(Boolean).join(' ')
+      : (res === 'timeout' ? 'ВК молчит' : 'ВК: result ≠ true');
+    const plat = launchPlatform();
+    const text = [what, sec + ' с', 'пред. ' + pre, clientVer || plat].filter(Boolean).join(' · ');
+    // app — нативное приложение ВК (не браузер): блокировщика там не бывает
+    const app = /^(mobile_(android|iphone|ipad)|android_|iphone_|ipad_)/.test(plat);
+    return { fmt, res, type: be.type, code: be.code, reason: be.reason, sec, pre, cv: clientVer, app, key, text };
   }
 
   /* ---------- Rewarded-реклама доступна ----------
@@ -377,6 +481,7 @@ window.Platform = (() => {
     // Единая точка выхода: settle-once. Опоздавший ответ моста ПОСЛЕ
     // сработавшего таймаута не снимет паузу второй раз и не сдвинет
     // кулдаун гейта в main.js повторно.
+    const releaseChecks = holdChecksForShow();   // b56: проверки ждут ответа о показе
     const finish = (wasShown, reason, outcome) => {
       if (settled) return;
       settled = true;
@@ -385,7 +490,8 @@ window.Platform = (() => {
     };
     const shown = vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' });
     // b53: следующий ролик — заранее, когда мост ответил про этот.
-    Promise.resolve(shown).then(() => preloadAds('interstitial'), () => preloadAds('interstitial'));
+    const afterShow = () => { releaseChecks(); preloadAds('interstitial'); };
+    Promise.resolve(shown).then(afterShow, afterShow);
     withTimeout(shown, AD_HANG_TIMEOUT_MS)
       .then((res) => {
         if (res && res.result === false) {
@@ -442,11 +548,15 @@ window.Platform = (() => {
     let settled = false;   // onResume — ровно один раз (ответ моста или сторож)
     let granted = false;   // награда — ровно один раз и только по result === true
     let timer = null;
-    const finish = (reason, outcome) => {
+    const startedAt = Date.now();
+    const releaseChecks = holdChecksForShow();   // b56: проверки ждут ответа о показе
+    // b56: onResume(outcome, diag) — diag только у исходов без показа (adDiag)
+    const finish = (reason, outcome, diag) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (onResume) onResume(outcome);
+      if (diag) console.warn('[platform] ' + adFormat + ' не показана: ' + diag.text);
+      if (onResume) onResume(outcome, diag);
       console.log('[platform] ' + adFormat + ' завершён: ' + reason);
     };
     const grant = (late) => {
@@ -459,7 +569,7 @@ window.Platform = (() => {
     timer = setTimeout(() => {
       console.warn('[platform] ' + adFormat + ': мост молчит ' + AD_HANG_TIMEOUT_MS +
         ' мс — пауза снята; если ролик ещё идёт, награда придёт по его подтверждению');
-      finish('сторож ' + AD_HANG_TIMEOUT_MS + ' мс', 'timeout');
+      finish('сторож ' + AD_HANG_TIMEOUT_MS + ' мс', 'timeout', adDiag(adFormat, startedAt, 'timeout'));
     }, AD_HANG_TIMEOUT_MS);
     let shown;
     try { shown = vkBridge.send('VKWebAppShowNativeAds', { ad_format: adFormat }); } catch (e) { shown = Promise.reject(e); }
@@ -470,13 +580,13 @@ window.Platform = (() => {
           finish('показана (result=true)', okOutcome);
           grant(late);
         } else {
-          finish('мост ответил без result=true — награды нет', failOutcome);
+          finish('мост ответил без result=true — награды нет', failOutcome, adDiag(adFormat, startedAt, 'no_result'));
         }
       }, (e) => {
         console.warn('[platform] ' + adFormat + ' недоступна (adblock, нет объявлений) — награды нет:', e);
-        finish('ошибка — награды нет', 'error');
+        finish('ошибка — награды нет', 'error', adDiag(adFormat, startedAt, 'error', e));
       })
-      .then(() => preloadAds(adFormat));   // b53: следующий ролик — заранее
+      .then(() => { releaseChecks(); preloadAds(adFormat); });   // b53: следующий ролик — заранее
   }
 
   /* b26: onResume(outcome) — 'reward' | 'closed' | 'error' | 'timeout' |
